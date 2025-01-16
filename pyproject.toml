@@ -1,0 +1,21 @@
+[project]
+name = "master"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "blueye-protocol==2.7.0",
+    "blueye-sdk>=2.3.0",
+    "matplotlib>=3.10.0",
+    "numpy>=1.26.4",
+    "scipy>=1.15.1",
+]
+
+[dependency-groups]
+dev = [
+    "black>=24.10.0",
+    "pytest>=8.3.4",
+]
+
+
