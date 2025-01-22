@@ -8,6 +8,8 @@ dependencies = [
     "blueye-protocol==2.7.0",
     "blueye-sdk>=2.3.0",
     "matplotlib>=3.10.0",
+    "mcap>=1.2.2",
+    "mcap-protobuf-support>=0.5.2",
     "numpy>=1.26.4",
     "scipy>=1.15.1",
 ]
@@ -18,4 +20,5 @@ dev = [
     "pytest>=8.3.4",
 ]
 
-
+[tool.black]
+line-length = 100
