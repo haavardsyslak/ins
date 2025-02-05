@@ -10,30 +10,37 @@ class SigmaPoints:
     """
 
     def __init__(self, n, alpha=1e-1, beta=2, kappa=0):
-        self.lamb = self.alpha**2 / (self.n + self.kappa) - self.n
+        self.lamb = alpha**2 * (n + kappa) - n
+        self.alpha = alpha
+        self.beta = beta
         self.n = n
-        self.num_sigmas = 2 * n + 1
-        self.Wm = np.zeros(n)
-        self.Wc = np.zeros(n)
+        self.num_sigmas = 2 * n
+        self.Wm_0 = 0
+        self.Wm_i = 0
+        self.Wc_0 = 0
+        self.Wc_i = 0
         # self.points = np.zeros(n + 1, dtype=float)
 
     def compute_weights(self):
-        a = self.lamb / (self.n + self.lamb)
-        self.Wm[0] = a
-        self.Wc[0] = a - (1 - self.alpha**2 + self.beta)
-        self.Wm[1:] = np.full(self.n, 1 / (2 * (self.n + self.lamb)))
-        self.Wc[1:] = self.Wm[1:]
+        lambda_ = self.lamb
+        n = self.n
+        alpha = self.alpha
+        beta = self.beta
+        self.Wm_0 = lambda_ / (n + lambda_)
+        self.Wc_0 = self.Wc_0 + (1 - alpha**2 + beta)
+        self.Wm_i = 1 / (2 * (n + lambda_))
+        self.Wc_i = self.Wm_i
 
     def compute_sigma_points(self, x, P):
         self.compute_weights()
 
-        L = scipy.linalg.cholesky((self.n + self.lamb) @ P)
+        L = (self.n + self.lamb) * np.linalg.cholesky(P)
 
         points = np.zeros((self.num_sigmas, self.n))
         points[0] = x
 
         for i in range(self.n):
-            points[i + 1] = x + L
-            points[i + 1 + self.n] = x - L
+            points[i] = x + L[i]
+            points[i + self.n] = x - L[i]
 
         return points
