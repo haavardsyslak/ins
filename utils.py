@@ -9,3 +9,8 @@ def skew(v: np.ndarray) -> np.ndarray:
     ])
 
     return v_skew
+
+
+def vee(Phi) -> np.ndarray:
+    phi = np.array([Phi[2, 1], Phi[0, 2], Phi[1, 0]])
+    return phi

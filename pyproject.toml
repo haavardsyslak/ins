@@ -12,6 +12,7 @@ dependencies = [
     "mcap-protobuf-support>=0.5.2",
     "numpy>=1.26.4",
     "scipy>=1.15.1",
+    "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
