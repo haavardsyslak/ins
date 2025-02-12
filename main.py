@@ -1,51 +1,52 @@
 from quaternion import RotationQuaterion
 import numpy as np
+import scipy
 from mcap.reader import make_reader
 from state import LieState
-from sigma_points import SigmaPoints
+from sigma_points import SigmaPoints, JulierSigmaPoints
 from scipy.spatial.transform import Rotation as Rot
 from ukf import UKFM
 from be_telemetry import McapLogger
-from models import ImuModel
+from models import ImuModel, DvlMeasurement, DepthMeasurement
 import json
 import traceback
+from tqdm import tqdm
 
 
-def a():
-    with open("./log_car_left_back.mcap", "rb") as f:
-        reader = make_reader(f)
-        print(reader)
-        t0 = None
-        for schema, channel, message in reader.iter_messages():
-            print(channel.topic)
-            print(schema.name)
-            print(message.log_time - t0)
-            input()
+def make_ukf():
+    model = ImuModel(
+        gyro_std=0.01,
+        gyro_bias_std=3.5e-4,
+        gyro_bias_p=1e-16,
 
-
-def make_ukf(model):
-    Q = np.eye(6) * 1e-3
-    R_v = np.eye(3) * 1e-3
+        acc_std=0.05,
+        acc_bias_std=5e-4,
+        acc_bias_p=1e-16
+    )
 
     dim_x = 9
+    dim_q = model.Q.shape[0]
     dim_z = 3
-    noise_points = SigmaPoints(6, alpha=1e-5, kappa=0)
-    sigma_points = SigmaPoints(9, alpha=1e-5, kappa=0)
-    P0 = np.eye(9) * 1e-5
+    noise_points = SigmaPoints(dim_q, alpha=1e-3, kappa=3-dim_q)
+    sigma_points = SigmaPoints(dim_x, alpha=1e-3, kappa=3-dim_x)
+    # noise_points = JulierSigmaPoints(dim_q, alpha=1e-5)
+    # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-5)
+    P0 = np.eye(dim_x) * 1e-9
 
-    R = Rot.from_euler("XYZ", [0, 0, -2.14])
-    x0 = LieState(R=R.as_matrix(), pos=np.array([1.8, -4.3, 0]), vel=np.array([0, 0, 0]))
+    R = Rot.from_euler("XYZ", [0, 0, -2.14]).as_matrix()
+    v0 = R @ np.array([-0.04, 0.024, -0.023])
+    p0 = np.array([1.8, -4.3, 0.22])
+
+    x0 = LieState(R=R, pos=p0, vel=v0)
 
     ukf = UKFM(
         dim_x=dim_x,
-        dim_q=6,
+        dim_q=dim_q,
         points=sigma_points,
         noise_points=noise_points,
         model=model,
         x0=x0,
         P0=P0,
-        Q=Q,
-        R=R_v,
     )
 
     return ukf
@@ -56,25 +57,24 @@ def main():
     logger = McapLogger("ufk_test.mcap")
     logger.start()
 
-    model = ImuModel(0, 0, 0, 0, 0, 0)
-
-    ukf = make_ukf(model)
+    ukf = make_ukf()
     has_pred = False
+    R_dvl = np.eye(3) * 2e-5
+    # R_dvl[-1] = 4e-2
+    R_depth = 1e-3
+    dvl_meas = DvlMeasurement(R_dvl)
+    depth_meas = DepthMeasurement(R_depth)
 
     with open("./log_car_left_back.mcap", "rb") as f:
         reader = make_reader(f)
         t = 0
         t_tot = 0
-        # iter = reader.iter_messages()
-        # schema, channel, message = next(iter)
         t0 = 0
-        for schema, channel, message in reader.iter_messages():
-            # TOOD: run the ukf here, and log the raw messages back to a mcap file. alternatively,
-            # we can log the ukf results first then the raw messages if this takes up too much cpu
-            # if not has_pred and channel.topic != "imu":
-            #     t0 = message.log_time
-            #     t = message.log_time
-            #     continue
+        for schema, channel, message in tqdm(reader.iter_messages()):
+            if not has_pred and channel.topic != "imu":
+                t0 = message.log_time
+                t = message.log_time
+                continue
             if not has_pred:
                 t0 = message.log_time
                 t = message.log_time
@@ -91,27 +91,33 @@ def main():
                         msg = json.loads(message.data.decode())
                         acc = msg["accelerometer"]
                         gyro = msg["gyroscope"]
-                        u = np.array([acc["x"], acc["y"], acc["z"],
-                                     gyro["x"], gyro["y"], gyro["z"]])
+                        u = np.array(
+                            [gyro["x"], gyro["y"], gyro["z"], acc["x"], acc["y"], acc["z"]]
+                        )
 
                         ukf.propagate(u, dt)
-                        logger.log_message("state", ukf.x.to_json().encode(),
-                                           timestamp=message.log_time)
+                        logger.log_message(
+                            "state", ukf.x.to_json().encode(), timestamp=message.log_time
+                        )
 
                     case "dvl":
                         msg = json.loads(message.data.decode())
                         vel = msg["velocity"]
-                        z = np.array([vel["x"], vel["y"], vel["z"]])
-                        ukf.update(z, 0)
+                        dvl_meas.z = np.array([vel["x"], vel["y"], vel["z"]])
+                        ukf.update(dvl_meas, 0)
 
                         logger.log_message("dvl", message.data, message.log_time)
-                        logger.log_message("state", ukf.x.to_json().encode(), message.log_time)
+                        # logger.log_message("state", ukf.x.to_json().encode(), message.log_time)
 
                     case "pos":
-                        logger.log_message("pos", message.data, timestamp=message.log_time)
+                        msg = log_pos(message.data)
+                        logger.log_message("pos", msg, timestamp=message.log_time)
 
                     case "depth":
                         logger.log_message("depth", message.data, timestamp=message.log_time)
+                        msg = json.loads(message.data.decode())
+                        depth_meas.z = msg["value"]
+                        ukf.update(depth_meas, 0)
 
             except Exception:
                 print(f"died at: {(t - t0) * 1e-9}")
@@ -121,6 +127,32 @@ def main():
 
     if logger.running:
         logger.stop()
+
+
+def wrap_angle(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def log_pos(msg):
+    pos = json.loads(msg.decode())
+    pos_estimate = {
+        "northing": pos["northing"],
+        "easting": pos["easting"],
+        "heading": wrap_angle(pos["heading"]),
+        "surge_rate": pos["surge_rate"],
+        "sway_rate": pos["sway_rate"],
+        "yaw_rate": pos["yaw_rate"],
+        "ocean_current": pos["ocean_current"],
+        "odometer": pos["odometer"],
+        "is_valid": pos["is_valid"],
+        "global_position": {
+            "latitude": pos["global_position"]["latitude"],
+            "longitude": pos["global_position"]["longitude"],
+        },
+        "speed_over_ground": pos["speed_over_ground"],
+        "course_over_ground": pos["course_over_ground"],
+    }
+    return json.dumps(pos_estimate).encode()
 
 
 if __name__ == "__main__":

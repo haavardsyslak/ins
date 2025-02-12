@@ -204,7 +204,47 @@ state_est_schema = {
                 }
             },
             "required": ["roll", "pitch", "yaw"]
-        }
+        },
+       # "gravity": {
+        #     "type": "object",
+        #     "properties": {
+        #             "g": {"type": "number"}
+        #     }
+        # },
+        "gyro_bias": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "number",
+                    "description": "Rotation around the x-axis"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Rotation around the y-axis"
+                },
+                "z": {
+                    "type": "number",
+                    "description": "Rotation around the z-axis"
+                }
+            },
+        },
+        # "acc_bias": {
+        #     "type": "object",
+        #     "properties": {
+        #         "x": {
+        #             "type": "number",
+        #             "description": "Rotation around the x-axis"
+        #         },
+        #         "y": {
+        #             "type": "number",
+        #             "description": "Rotation around the y-axis"
+        #         },
+        #         "z": {
+        #             "type": "number",
+        #             "description": "Rotation around the z-axis"
+        #         }
+        #     },
+        # }
     },
     "required": ["velocity", "pose", "euler_angles"]  # Moved outside "properties"
 }

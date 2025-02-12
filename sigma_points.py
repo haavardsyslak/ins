@@ -2,6 +2,25 @@ import numpy as np
 import scipy
 from dataclasses import dataclass
 
+class JulierSigmaPoints:
+        def __init__(self, n, alpha):
+            # propagation w.r.t. state
+            self.n = n
+            self.lambda_ = (alpha**2 - 1) * n
+            self.num_sigmas = 2 * n
+            self.Wm_i = 1 / (2 * (self.lambda_ + n)) # = wj
+            self.Wm_0 = self.lambda_ / (self.lambda_ + n) # wm
+            self.Wc_0 = self.lambda_ / (self.lambda_ + n) + 3 - alpha**2 # w0
+            self.Wc_i = 1 / (2 * (self.lambda_ + n))
+
+        def compute_sigma_points(self, x, P) -> np.ndarray:
+            L = np.linalg.cholesky((self.n + self.lambda_) * P).T
+            points = np.zeros((self.num_sigmas, self.n))
+            for i in range(self.n):
+                points[i] = x + L[i]
+                points[i + self.n] = x - L[i]
+
+            return points
 
 class SigmaPoints:
     """
@@ -34,7 +53,7 @@ class SigmaPoints:
     def compute_sigma_points(self, x, P):
         self.compute_weights()
 
-        L = (self.n + self.lamb) * np.linalg.cholesky(P)
+        L = np.linalg.cholesky((self.n + self.lamb) * P).T
 
         points = np.zeros((self.num_sigmas, self.n))
         points[0] = x
