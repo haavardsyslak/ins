@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def skew(v: np.ndarray) -> np.ndarray:
     v_skew = np.array([
         [0, -v[2], v[1]],

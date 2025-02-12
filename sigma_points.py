@@ -10,8 +10,8 @@ class JulierSigmaPoints:
             self.num_sigmas = 2 * n
             self.Wm_i = 1 / (2 * (self.lambda_ + n)) # = wj
             self.Wm_0 = self.lambda_ / (self.lambda_ + n) # wm
-            self.Wc_i = self.lambda_ / (self.lambda_ + n) + 3 - alpha**2 # w0
-            self.Wc_0 = self.lambda_ / (self.lambda_ + n) 
+            self.Wc_0 = self.lambda_ / (self.lambda_ + n) + 3 - alpha**2 # w0
+            self.Wc_i = 1 / (2 * (self.lambda_ + n))
 
         def compute_sigma_points(self, x, P) -> np.ndarray:
             L = np.linalg.cholesky((self.n + self.lambda_) * P).T

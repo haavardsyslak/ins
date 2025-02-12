@@ -2,58 +2,7 @@ import numpy as np
 from dataclasses import dataclass
 from quaternion import RotationQuaterion, AttitudeError
 import json
-
 from scipy.spatial.transform import Rotation
-
-
-@dataclass
-class ErrorState:
-    pos: np.ndarray
-    vel: np.ndarray
-    ori: np.ndarray
-
-    def as_vec(self):
-        return np.hstack(self.pos, self.vel, self.ori)
-
-    @staticmethod
-    def from_vec(vec):
-        pos = vec[0:3]
-        vel = vec[3:6]
-        ori = vec[6:9]
-        return ErrorState(pos, vel, ori)
-
-
-@dataclass
-class State:
-    pos: np.ndarray
-    vel: np.ndarray
-    ori: RotationQuaterion
-
-    def as_vec(self) -> np.ndarray:
-        return np.hstack(self.pos, self.vel, self.ori.as_vec())
-
-    @staticmethod
-    def from_vec(vec: np.ndarray):
-        pos = vec[0:3]
-        vel = vec[3:6]
-        ori = RotationQuaterion.from_vec(vec[6:10])
-
-        return State(pos, vel, ori)
-
-    def add_error_state(self, error_state: ErrorState):
-        self.pos + error_state.pos
-        self.vel + error_state.vel
-        self.ori @ AttitudeError.from_rodrigues_param(error_state.ori)
-
-    def split(self):
-        euclidean = np.hstack(self.pos, self.vel)
-        return (euclidean, self.ori.as_vec())
-
-    def dim_euclidean(self):
-        return 9
-
-    def dim_non_euclidean(self):
-        return 4
 
 
 @dataclass
@@ -61,8 +10,7 @@ class LieState:
     R: np.ndarray
     vel: np.ndarray
     pos: np.ndarray
-    # gyro_bias: np.ndarray
-    # acc_bias: np.ndarray
+    # g: float
 
     def to_json(self) -> str:
         q = Rotation.from_matrix(self.R).as_quat()
@@ -77,6 +25,7 @@ class LieState:
             "euler_angles": {"roll": euler[0], "pitch": euler[1], "yaw": euler[2]},
             # "gyro_bias": {"x": self.gyro_bias[0], "y": self.gyro_bias[1], "z": self.gyro_bias[2]},
             # "acc_bias": {"x": self.acc_bias[0], "y": self.acc_bias[1], "z": self.acc_bias[2]},
+            # "gravity": {"g": self.g},
         }
 
         return json.dumps(msg)
