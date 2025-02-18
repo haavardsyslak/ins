@@ -1,5 +1,66 @@
 import numpy as np
 from utils import skew, vee
+from scipy.spatial.transform import Rotation as Rot
+
+
+class SU2:
+    TOL = 1e-8
+
+    @classmethod
+    def Exp(cls, omega, dt):
+        return Rot.from_rotvec(omega*dt).as_quat(scalar_first=True)
+        norm = np.linalg.norm(omega)
+        angle = norm * dt
+        if angle < cls.TOL:
+            q = np.array([1.0, *(.5 * omega * dt)])
+        else:
+            half_angle = angle / 2
+            c = np.cos(angle)
+            s = omega / norm * np.sin(half_angle)
+            q = np.array([c, *s])
+
+        return q
+
+    @classmethod
+    def exp(cls, phi):
+        angle = np.linalg.norm(phi)
+        if angle < 1e-10:
+            return np.array([1.0, *(.5 * phi)])
+
+        axis = phi / angle
+        half_angle = angle / 2
+        c = np.cos(half_angle)
+        s = np.sin(half_angle)
+        q = np.hstack([c, axis * s])
+
+        return q
+
+    @classmethod
+    def log(cls, q):
+        qw = q[0]
+        qv = q[1:]
+        norm = np.linalg.norm(qv)
+        
+        if norm < cls.TOL:
+            # Small-angle approximation
+            return 2 * qv / qw
+        
+        # General case
+        theta = 2 * np.arctan2(norm, qw)
+        return (theta / norm) * qv
+
+    # @classmethod
+    # def log(cls, q):
+    #     qw = q[0]
+    #     qv = q[1:]
+    #     norm = np.linalg.norm(qv)
+    #     if norm < cls.TOL:
+    #         r = 2 * qv / qw * (1 - norm ** 2 / (3 * qw**2))
+    #     else:
+    #         theta = 2 * np.atan2(norm, qw)
+    #         u = qv / norm
+    #         r = theta * u
+    #     return r
 
 
 class SO3:
@@ -14,7 +75,7 @@ class SO3:
         else:
             axis = phi / angle
             c = np.cos(angle)
-            s = np.sin(angle)
+            s = np.sin(anglec, *s)
             Rot = c * np.eye(3) + (1 - c) * np.outer(axis, axis) + s * skew(axis)
         return Rot
 

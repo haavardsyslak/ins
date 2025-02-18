@@ -1,65 +1,68 @@
-from quaternion import RotationQuaterion
+from orientation import RotationQuaterion
 import numpy as np
 import scipy
 from mcap.reader import make_reader
-from state import LieState
-from sigma_points import SigmaPoints, JulierSigmaPoints
+from state import LieState, State
+from sigma_points import SigmaPoints, JulierSigmaPoints, MwereSigmaPoints, SimplexSigmaPoints
 from scipy.spatial.transform import Rotation as Rot
-from ukf import UKFM
+from ukf import UKFM, QUKF
 from be_telemetry import McapLogger
-from models import ImuModel, DvlMeasurement, DepthMeasurement
+from models import ImuModelQuat, DvlMeasurement, DepthMeasurement
 import json
 import traceback
 from tqdm import tqdm
 
 
 def make_ukf():
-    model = ImuModel(
-        gyro_std=0.01,
+    model = ImuModelQuat(
+        gyro_std=0.001,
         gyro_bias_std=3.5e-4,
         gyro_bias_p=1e-16,
 
-        acc_std=0.05,
+        acc_std=0.001,
         acc_bias_std=5e-4,
         acc_bias_p=1e-16
     )
 
-    dim_x = 9
+    dim_x = 9 
     dim_q = model.Q.shape[0]
     dim_z = 3
-    noise_points = SigmaPoints(dim_q, alpha=1e-3, kappa=3-dim_q)
-    sigma_points = SigmaPoints(dim_x, alpha=1e-3, kappa=3-dim_x)
-    # noise_points = JulierSigmaPoints(dim_q, alpha=1e-5)
-    # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-5)
-    P0 = np.eye(dim_x) * 1e-9
+    # sigma_points = MwereSigmaPoints(dim_x + dim_q, alpha=1.e-3, kappa=3. - (dim_x + dim_q))
+    sigma_points = SimplexSigmaPoints(dim_x + dim_q)
+    P0 = np.eye(dim_x)
 
-    R = Rot.from_euler("XYZ", [0, 0, -2.14]).as_matrix()
-    v0 = R @ np.array([-0.04, 0.024, -0.023])
+    R = Rot.from_euler("XYZ", [0, 0, -2.14])
+    q0 = Rot.from_euler("XYZ", [0, 0, -2.14]).as_quat(scalar_first=True)
+    q0 = RotationQuaterion.from_vec(q0)
+    v0 = q0.rotate_vec(np.array([-0.04, 0.024, -0.023]))
     p0 = np.array([1.8, -4.3, 0.22])
 
-    x0 = LieState(R=R, pos=p0, vel=v0)
+    # x0 = LieState(R=R, pos=p0, vel=v0)
+    x0 = State(ori=q0, vel=v0, pos=p0)
 
-    ukf = UKFM(
-        dim_x=dim_x,
-        dim_q=dim_q,
-        points=sigma_points,
-        noise_points=noise_points,
-        model=model,
-        x0=x0,
-        P0=P0,
-    )
+    # ukf = UKFM(
+    #     dim_x=dim_x,
+    #     dim_q=dim_q,
+    #     points=sigma_points,
+    #     noise_points=noise_points,
+    #     model=model,
+    #     x0=x0,
+    #     P0=P0,
+    # )
+
+    ukf = QUKF(model=model, dim_x=dim_x, dim_q=dim_q, x0=x0, P0=P0, sigma_points=sigma_points, Q=model.Q)
 
     return ukf
 
 
 def main():
-    np.set_printoptions(precision=2, linewidth=99)
+    np.set_printoptions(precision=2, linewidth=999)
     logger = McapLogger("ufk_test.mcap")
     logger.start()
 
     ukf = make_ukf()
     has_pred = False
-    R_dvl = np.eye(3) * 2e-5
+    R_dvl = np.eye(3) * 2e-9
     # R_dvl[-1] = 4e-2
     R_depth = 1e-3
     dvl_meas = DvlMeasurement(R_dvl)
@@ -107,7 +110,7 @@ def main():
                         ukf.update(dvl_meas, 0)
 
                         logger.log_message("dvl", message.data, message.log_time)
-                        # logger.log_message("state", ukf.x.to_json().encode(), message.log_time)
+                        logger.log_message("state", ukf.x.to_json().encode(), message.log_time)
 
                     case "pos":
                         msg = log_pos(message.data)
@@ -117,7 +120,7 @@ def main():
                         logger.log_message("depth", message.data, timestamp=message.log_time)
                         msg = json.loads(message.data.decode())
                         depth_meas.z = msg["value"]
-                        ukf.update(depth_meas, 0)
+                        # ukf.update(depth_meas, 0)
 
             except Exception:
                 print(f"died at: {(t - t0) * 1e-9}")
