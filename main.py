@@ -107,7 +107,7 @@ def main():
                         msg = json.loads(message.data.decode())
                         vel = msg["velocity"]
                         dvl_meas.z = np.array([vel["x"], vel["y"], vel["z"]])
-                        ukf.update(dvl_meas, 0)
+                        # ukf.update(dvl_meas, 0)
 
                         logger.log_message("dvl", message.data, message.log_time)
                         logger.log_message("state", ukf.x.to_json().encode(), message.log_time)
@@ -120,7 +120,7 @@ def main():
                         logger.log_message("depth", message.data, timestamp=message.log_time)
                         msg = json.loads(message.data.decode())
                         depth_meas.z = msg["value"]
-                        # ukf.update(depth_meas, 0)
+                        ukf.update(depth_meas, 0)
 
             except Exception:
                 print(f"died at: {(t - t0) * 1e-9}")
