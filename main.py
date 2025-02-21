@@ -27,10 +27,10 @@ def make_ukf():
     dim_x = 9
     dim_q = model.Q.shape[0]
     dim_z = 3
-    noise_points = SigmaPoints(dim_q, alpha=1e-3, kappa=3-dim_q)
-    sigma_points = SigmaPoints(dim_x, alpha=1e-3, kappa=3-dim_x)
-    # noise_points = JulierSigmaPoints(dim_q, alpha=1e-5)
-    # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-5)
+    noise_points = SigmaPoints(dim_q, alpha=1e-4, kappa=3-dim_q)
+    sigma_points = SigmaPoints(dim_x, alpha=1e-2, kappa=3-dim_x)
+    # noise_points = JulierSigmaPoints(dim_q, alpha=1e-2)
+    # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-2)
     P0 = np.eye(dim_x) * 1e-9
 
     R = Rot.from_euler("XYZ", [0, 0, -2.14]).as_matrix()
