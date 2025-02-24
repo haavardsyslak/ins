@@ -6,6 +6,7 @@ from lie import SO3
 import scipy
 from abc import ABC, abstractmethod
 from typing import Optional
+import manifpy as manif
 
 
 @dataclass
@@ -29,16 +30,38 @@ class ImuModel:
         self.Q = scipy.linalg.block_diag(
             self.gyro_std**2 * np.eye(3),
             self.acc_std**2 * np.eye(3),
-            # self.gyro_bias_std**2 * np.eye(3),
+            # np.array([0, 0, 0.00001]),
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
-        acc = (u[3:6] * 9.81) + w[3:6]
-        R = state.R @ SO3.exp(omega * dt)
-        p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) - self.g) * dt**2
-        v = state.vel + ((state.R @ acc) - self.g) * dt
-        return LieState(R=R, vel=v, pos=p)
+        acc = (u[3:6] * 9.81) #+ w[3:6]
+        acc *=-1
+        acc += w[3:6]
+
+        
+        R = state.state.rotation()
+        # acc_b = acc + (R.T @ self.g)
+        # acc_n = R @ (acc_b)
+        acc_b = acc + R.T @ np.array([0, 0, state.g])
+        # acc_n = (R @ acc) - self.g
+        # acc_b = R.T @ acc
+        # xi = np.concatenate(
+        #     [omega * dt, acc_n * dt, state.state.linearVelocity() + .5 * acc_n * dt**2])
+        d_vel = acc_b * dt
+        d_pos = state.state.linearVelocity() * dt + .5 * acc_b * dt**2
+        d_rot = omega * dt
+        xi = np.concatenate(
+            [R @ d_pos, d_rot, d_vel])
+        xi_hat = manif.SE_2_3Tangent(xi)
+
+        new_state = state.state.rplus(xi_hat)
+
+        # R = state.R @ SO3.exp(omega * dt)
+        # p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) - self.g) * dt**2
+        # v = state.vel + ((state.R @ acc) - self.g) * dt
+        # return LieState(R=R, vel=v, pos=p)
+        return LieState(new_state, g=state.g)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
@@ -46,20 +69,17 @@ class ImuModel:
     @classmethod
     def phi(cls, state, xi):
         """Takes points in the euclidean space onto the manifold (Exp map)"""
-        R = SO3.exp(xi[:3]) @ state.R
-        v = state.vel + xi[3:6]
-        p = state.pos + xi[6:9]
-        # g = state.g + xi[-1]
-        return LieState(R=R, vel=v, pos=p)
+        lie_xi = manif.SE_2_3Tangent(xi[:9])
+        dg = state.g + xi[-1]
+        return LieState(state.state.rplus(lie_xi), g=dg)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
-        rot = SO3.log(state_hat.R.dot(state.R.T))
-        v = state_hat.vel - state.vel
-        p = state_hat.pos - state.pos
+        lie_state = state.state.rminus(state_hat.state).coeffs()
+        dg = state.g - state_hat.g
 
-        return np.hstack([rot, v, p])
+        return np.concatenate([lie_state, np.array([dg])])
 
     def left_phi(cls, state, xi):
         delta_rot = SO3.exp(xi[:3])
@@ -109,7 +129,9 @@ class DvlMeasurement(Measurement):
         self._z = val
 
     def h(self, state: LieState) -> np.ndarray:
-        return state.R.T @ state.vel
+        # return state.state.rotation().transpose() @ state.state.linearVelocity()
+        # return state.state.rotation().transpose() @ state.state.linearVelocity()
+        return state.state.linearVelocity()
 
 
 class Magneotmeter(Measurement):
@@ -150,4 +172,4 @@ class DepthMeasurement(Measurement):
         self._z = val
 
     def h(self, state: LieState) -> float:
-        return state.pos[-1]
+        return state.state.z()

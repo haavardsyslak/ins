@@ -11,7 +11,7 @@ from models import ImuModel, DvlMeasurement, DepthMeasurement
 import json
 import traceback
 from tqdm import tqdm
-
+import manifpy as manif
 
 def make_ukf():
     model = ImuModel(
@@ -24,7 +24,7 @@ def make_ukf():
         acc_bias_p=1e-16
     )
 
-    dim_x = 9
+    dim_x = 10
     dim_q = model.Q.shape[0]
     dim_z = 3
     noise_points = SigmaPoints(dim_q, alpha=1e-4, kappa=3-dim_q)
@@ -33,11 +33,17 @@ def make_ukf():
     # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-2)
     P0 = np.eye(dim_x) * 1e-9
 
-    R = Rot.from_euler("XYZ", [0, 0, -2.14]).as_matrix()
+    euler0 = np.array([0, 0, -2.14])
+    Rot_obj = Rot.from_euler("XYZ", [0, 0, -2.14])
+    q0 = Rot_obj.as_quat(scalar_first=False)
+    R = Rot_obj.as_matrix()
     v0 = R @ np.array([-0.04, 0.024, -0.023])
     p0 = np.array([1.8, -4.3, 0.22])
 
-    x0 = LieState(R=R, pos=p0, vel=v0)
+    # x0 = LieState(R=R, pos=p0, vel=v0)
+    # Manif seems to use scalar last quaternion
+    x0 = LieState(manif.SE_2_3(np.concatenate([p0, q0, v0])), g=9.81)
+
 
     ukf = UKFM(
         dim_x=dim_x,
@@ -117,7 +123,7 @@ def main():
                         logger.log_message("depth", message.data, timestamp=message.log_time)
                         msg = json.loads(message.data.decode())
                         depth_meas.z = msg["value"]
-                        ukf.update(depth_meas, 0)
+                        # ukf.update(depth_meas, 0)
 
             except Exception:
                 print(f"died at: {(t - t0) * 1e-9}")

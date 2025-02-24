@@ -39,10 +39,7 @@ class UKFM:
         # Q = self.model.Q_c
         self.P += 1e-9 * np.eye(self.P.shape[0])
 
-        if self.Q is not None:
-            Q = self.Q * dt  # TOOO: need to get the discritized Q mat
-        else:
-            Q = self.model.Q * dt**2
+        Q = self.model.Q * dt
 
         w_q = np.zeros(self.dim_q)
         # Predict the nominal state
@@ -81,7 +78,7 @@ class UKFM:
 
         Q = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(xi_bar, xi_bar)
         self.P = P + Q
-        # self.P = (self.P + self.P.T) / 2
+        self.P = (self.P + self.P.T) / 2
         self.x = x_pred
         # self.x = self.model.phi(x_pred, new_xi)
 
@@ -109,7 +106,7 @@ class UKFM:
         new_xis = new_xis - z_pred_bar
 
         S = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(dz, dz) + R
-        Pxz = self.points.Wc_i * np.hstack([xis[:9].T, xis[9:].T]).dot(new_xis)
+        Pxz = self.points.Wc_i * np.hstack([xis[:10].T, xis[10:].T]).dot(new_xis)
         S_inv = np.linalg.inv(S)
 
         K = Pxz @ S_inv

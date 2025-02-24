@@ -205,12 +205,12 @@ state_est_schema = {
             },
             "required": ["roll", "pitch", "yaw"]
         },
-       # "gravity": {
-        #     "type": "object",
-        #     "properties": {
-        #             "g": {"type": "number"}
-        #     }
-        # },
+       "gravity": {
+            "type": "object",
+            "properties": {
+                    "g": {"type": "number"}
+            }
+        },
         "gyro_bias": {
             "type": "object",
             "properties": {

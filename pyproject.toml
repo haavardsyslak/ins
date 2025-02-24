@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "blueye-protocol==2.7.0",
     "blueye-sdk>=2.3.0",
+    "manifpy",
     "matplotlib>=3.10.0",
     "mcap>=1.2.2",
     "mcap-protobuf-support>=0.5.2",
@@ -23,3 +24,6 @@ dev = [
 
 [tool.black]
 line-length = 100
+
+[tool.uv.sources]
+manifpy = { git = "https://github.com/artivis/manif.git" }
