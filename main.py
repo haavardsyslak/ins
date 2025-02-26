@@ -37,7 +37,7 @@ def make_ukf():
     v0 = R @ np.array([-0.04, 0.024, -0.023])
     p0 = np.array([1.8, -4.3, 0.22])
 
-    x0 = LieState(R=R, pos=p0, vel=v0)
+    x0 = LieState(R=R, pos=p0, vel=v0, g=9.82)
 
     ukf = UKFM(
         dim_x=dim_x,

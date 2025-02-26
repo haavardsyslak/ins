@@ -34,11 +34,12 @@ class ImuModel:
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
-        acc = (u[3:6] * 9.81) + w[3:6]
+        acc = (-u[3:6] * 9.81) + w[3:6]
         R = state.R @ SO3.exp(omega * dt)
-        p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) - self.g) * dt**2
-        v = state.vel + ((state.R @ acc) - self.g) * dt
-        return LieState(R=R, vel=v, pos=p)
+        self.g = np.array([0, 0, state.g])
+        p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) + self.g) * dt**2
+        v = state.vel + ((state.R @ acc) + self.g) * dt
+        return LieState(R=R, vel=v, pos=p, g=state.g)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
@@ -49,8 +50,8 @@ class ImuModel:
         R = SO3.exp(xi[:3]) @ state.R
         v = state.vel + xi[3:6]
         p = state.pos + xi[6:9]
-        # g = state.g + xi[-1]
-        return LieState(R=R, vel=v, pos=p)
+        g = state.g + xi[-1]
+        return LieState(R=R, vel=v, pos=p, g=g)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
@@ -58,6 +59,7 @@ class ImuModel:
         rot = SO3.log(state_hat.R.dot(state.R.T))
         v = state_hat.vel - state.vel
         p = state_hat.pos - state.pos
+        g = state_hat.g - state.g
 
         return np.hstack([rot, v, p])
 
