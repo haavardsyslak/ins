@@ -30,6 +30,11 @@ def make_ukf():
     # sigma_points = MwereSigmaPoints(dim_x + dim_q, alpha=1.e-3, kappa=3. - (dim_x + dim_q))
     sigma_points = SimplexSigmaPoints(dim_x + dim_q)
     P0 = np.eye(dim_x)
+    # noise_points = SigmaPoints(dim_q, alpha=1e-4, kappa=3-dim_q)
+    # sigma_points = SigmaPoints(dim_x, alpha=1e-2, kappa=3-dim_x)
+    # noise_points = JulierSigmaPoints(dim_q, alpha=1e-2)
+    # sigma_points = JulierSigmaPoints(dim_x, alpha=1e-2)
+    P0 = np.eye(dim_x) * 1e-9
 
     R = Rot.from_euler("XYZ", [0, 0, -2.14])
     q0 = Rot.from_euler("XYZ", [0, 0, -2.14]).as_quat(scalar_first=True)
