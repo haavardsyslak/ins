@@ -159,7 +159,7 @@ class McapLogger:
 
 
 class FoxgloveBridge:
-    def __init__(self, host="0.0.0.0", port=8765, name="Blueye SDK bridge",
+    def __init__(self, host="0.0.0.0", port=8766, name="Blueye SDK bridge",
                  mcap_file="output.mcap", telem_names=[]):
         self.host = host
         self.port = port
