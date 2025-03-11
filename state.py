@@ -10,7 +10,7 @@ class LieState:
     R: np.ndarray
     vel: np.ndarray
     pos: np.ndarray
-    # g: float
+    g: float
 
     def to_json(self) -> str:
         q = Rotation.from_matrix(self.R).as_quat()
