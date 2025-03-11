@@ -1,9 +1,25 @@
 import numpy as np
 from dataclasses import dataclass
+from scipy.spatial.transform import Rotation as Rot
+from utils import skew
+from typing import Union
+from abc import ABC, abstractmethod
+
+
+class Orientation(ABC):
+    ori: Union['RotationQuaterion', np.ndarray]
+
+    @abstractmethod
+    def R(self):
+        pass
+
+
+class RotationMatrix(Orientation):
+    R: np.ndarray
 
 
 @dataclass
-class RotationQuaterion:
+class RotationQuaterion(Orientation):
     eta: float
     epsilon: np.ndarray
 
@@ -18,6 +34,14 @@ class RotationQuaterion:
         if self.eta < 0:
             self.eta *= -1
             self.epsilon *= -1
+
+    @property
+    def R(self):
+        """As rotation matrix"""
+        S = skew(self.epsilon)
+        R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
+
+        return R
 
     def multiply(self, other):
         eta_a = self.eta
@@ -34,16 +58,46 @@ class RotationQuaterion:
         else:
             raise ValueError("Quaternion must be numpy array or RotationQuaternion")
 
-        eta = eta_a * eta_b - np.dot(epsilon_a, epsilon_b)
-        epsilon = eta_b * epsilon_a + eta_a * epsilon_b + np.cross(eta_a, eta_b)
+        eta, epsilon = self._multiply(eta_a, epsilon_a, eta_b, epsilon_b)
 
         return RotationQuaterion(eta, epsilon)
+
+    @staticmethod
+    def _multiply(eta_a, epsilon_a, eta_b, epsilon_b):
+        eta = eta_a * eta_b - np.dot(epsilon_a, epsilon_b)
+        epsilon = eta_b * epsilon_a + eta_a * epsilon_b + np.cross(epsilon_a, epsilon_b)
+        return eta, epsilon
+
+    def rotate_vec(self, vec):
+        t = 2 * np.cross(self.epsilon, vec)
+        v_rot = vec + self.eta * t + np.cross(self.epsilon, t)
+        return v_rot
 
     def conj(self):
         return RotationQuaterion(self.eta, -self.epsilon)
 
     def as_vec(self):
-        return np.hstack((self.eta, self.epsilon))
+        return np.array([self.eta, *self.epsilon])
+
+    def as_euler(self):
+        n = self.eta
+        e1, e2, e3 = self.epsilon
+        phi = np.atan2(2 * (e3 * e2 + n * e1), n**2 - e1**2 - e2**2 + e3**2)
+        theta = np.asin(2 * (n * e2 - e1 * e3))
+        psi = np.atan2(2 * (e1 * e2 + n * e3), n**2 + e1**2 - e2**2 - e3**2)
+
+        return np.array([phi, theta, psi])
+
+    @staticmethod
+    def get_error_quat(qa, qb):
+        eta_a = qa[0]
+        epsilon_a = qa[1:]
+        eta_b = qb[0]
+        epsilon_b = -qb[1:]
+        eta, epsilon = RotationQuaterion._multiply(eta_a, epsilon_a, eta_b, epsilon_b)
+        q = np.array((eta, *epsilon))
+        q /= np.linalg.norm(q)
+        return q
 
     @classmethod
     def from_vec(cls, arr):
@@ -72,6 +126,21 @@ class AttitudeError:
 
         norm_sq = np.linalg.norm(arr) ** 2
         return (np.sqrt(4 + norm_sq)) * np.hstack((2, arr))
+
+
+def quaternion_weighted_average(quats, weights):
+    C = np.zeros((4, 4))
+    for i, q in enumerate(quats):
+        C += weights[i] * np.outer(q, q)
+
+    eigenvalues, eigenvectors = np.linalg.eigh(C)
+
+    mean_q = eigenvectors[:, np.argmax(eigenvalues)]
+    # Todo should check if eta is negative and change the sign?
+
+    # Ensure unit constraint
+    mean_q /= np.linalg.norm(mean_q)
+    return mean_q
 
 
 def average(quats):

@@ -1,15 +1,47 @@
 from dataclasses import dataclass, field
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
-from state import LieState
-from lie import SO3
+from state import LieState, State
+from lie import SO3, SU2
 import scipy
 from abc import ABC, abstractmethod
 from typing import Optional
+from utils import skew
 
 
 @dataclass
-class ImuModel:
+class ImuModelQuat:
+    gyro_std: float
+    gyro_bias_std: float
+    gyro_bias_p: float
+
+    acc_std: float
+    acc_bias_std: float
+    acc_bias_p: float
+
+    Q: np.ndarray = field(init=False, repr=False)
+
+    def __post_init__(self):
+        self.g = np.array((0, 0, 9.822))
+        self.Q = scipy.linalg.block_diag(
+            self.gyro_std**2 * np.eye(3),
+            self.acc_std**2 * np.eye(3))
+
+    def f(self, state: State, u: np.ndarray, dt: float, w: np.ndarray):
+        omega = u[:3] + w[:3]
+        acc = (u[3:6] * 9.81) + w[3:6]
+        acc_n_frame = state.ori.R @ acc - self.g
+
+        delta_rot = Rot.from_rotvec(omega * dt).as_quat(scalar_first=True)
+        q = state.ori @ delta_rot  # SU2.Exp(omega, dt)
+        v = state.vel + acc_n_frame * dt
+        p = state.pos + state.vel * dt + 0.5 * acc_n_frame * dt**2
+
+        return State(ori=q, vel=v, pos=p)
+
+
+@dataclass
+class ImuModelLie:
     """The IMU is considered a dynamic model instead of a sensar.
     This works as an IMU measures the change between two states,
     and not the state itself.."""
@@ -83,7 +115,7 @@ class ImuModel:
 
 
 class Measurement(ABC):
-    def __init__(self, R):
+    def __init__(self, R, z: Optional[np.ndarray] = None):
         self.R = R
 
     @abstractmethod
@@ -110,8 +142,11 @@ class DvlMeasurement(Measurement):
     def z(self, val: np.ndarray):
         self._z = val
 
-    def h(self, state: LieState) -> np.ndarray:
-        return state.R.T @ state.vel
+    def h(self, state: State) -> np.ndarray:
+        # return state.R.T @ state.vel
+
+        return state.ori.R.T @ state.vel
+        # return state.q.rotate_vec(self.z)
 
 
 class Magneotmeter(Measurement):
