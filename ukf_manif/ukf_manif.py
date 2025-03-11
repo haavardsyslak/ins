@@ -1,12 +1,12 @@
 import numpy as np
-import scipy
-from quaternion import RotationQuaterion, AttitudeError, average
+# import scipy
+# from quaternion import RotationQuaterion, AttitudeError, average
 from sigma_points import SigmaPoints
-from dataclasses import dataclass
-from typing import Callable
+# from dataclasses import dataclass
+# from typing import Callable
 from models import ImuModel
 from state import LieState
-from scipy.spatial.transform import Rotation as Rot
+# from scipy.spatial.transform import Rotation as Rot
 
 
 class UKFM:
