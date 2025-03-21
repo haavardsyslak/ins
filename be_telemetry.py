@@ -154,8 +154,8 @@ class DroneTelemetry:
         self.drone = Drone()
 
         self.drone.telemetry.set_msg_publish_frequency(bp.CalibratedImuTel, 100)
-        self.drone.telemetry.set_msg_publish_frequency(bp.DepthTel, 100)
-        self.drone.telemetry.set_msg_publish_frequency(bp.DvlVelocityTel, 100)
+        self.drone.telemetry.set_msg_publish_frequency(bp.DepthTel, 25)
+        self.drone.telemetry.set_msg_publish_frequency(bp.DvlVelocityTel, 10)
         self.drone.telemetry.set_msg_publish_frequency(bp.PositionEstimateTel, 100)
 
         cb_imu = self.drone.telemetry.add_msg_callback([bp.CalibratedImuTel], self._callback_imu)
@@ -193,7 +193,7 @@ class DroneTelemetry:
         self.logger.log_message("dvl", json.dumps(dvl_data).encode())
 
     def _callback_depth(self, msg_type: str, msg: bp.DepthTel):
-        self.logger.log_message("depth", bp.Depth.to_json(msg.depth).enocde())
+        self.logger.log_message("depth", bp.Depth.to_json(msg.depth).encode())
 
     def _callback_pos_estimate(self, msg_type: str, msg: bp.PositionEstimateTel):
         pos = msg.position_estimate
@@ -218,7 +218,7 @@ class DroneTelemetry:
 
 
 if __name__ == "__main__":
-    telem = DroneTelemetry("mcap_test.mcap")
+    telem = DroneTelemetry("logging_21_03.mcap")
     telem.start()
 
     input("Enter to stop")
