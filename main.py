@@ -2,7 +2,7 @@ from orientation import RotationQuaterion
 import numpy as np
 import scipy
 from mcap.reader import make_reader
-from state import LieState, State
+from state import LieState, NominalState
 from sigma_points import SigmaPoints, JulierSigmaPoints, MwereSigmaPoints, SimplexSigmaPoints
 from scipy.spatial.transform import Rotation as Rot
 from ukf import UKFM, QUKF
@@ -43,7 +43,7 @@ def make_ukf():
     p0 = np.array([1.8, -4.3, 0.22])
 
     # x0 = LieState(R=R, pos=p0, vel=v0)
-    x0 = State(ori=q0, vel=v0, pos=p0)
+    x0 = NominalState(ori=q0, vel=v0, pos=p0)
 
     # ukf = UKFM(
     #     dim_x=dim_x,

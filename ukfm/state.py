@@ -1,5 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclassstate
 from quaternion import RotationQuaterion, AttitudeError
 import json
 from scipy.spatial.transform import Rotation

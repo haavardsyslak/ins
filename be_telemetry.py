@@ -14,7 +14,6 @@ from blueye.sdk import Drone
 import blueye.protocol as bp
 from queue import Queue, Empty
 
-
 def add_file_descriptor_and_dependencies(file_descriptor, file_descriptor_set):
     """Recursively add descriptors and their dependencies to the FileDescriptorSet"""
     # Check if the descriptor is already in the FileDescriptorSet
@@ -132,6 +131,7 @@ class McapLogger:
         while self._running or not self.queue.empty():
             try:
                 topic, message, timestamp = self.queue.get(timeout=0.1)
+                print(topic)
                 with self.lock:
                     self.writer._writer.add_message(
                         channel_id=self.channel_ids[topic],
@@ -306,17 +306,48 @@ class DroneTelemetry:
     def _setup(self):
         msgs = []
         self.drone = Drone()
-        self.drone.telemetry.set_msg_publish_frequency(bp.CalibratedImuTel, 10)
+        self.drone.telemetry.set_msg_publish_frequency(bp.CalibratedImuTel, 100)
         msgs.append(bp.CalibratedImuTel)
+        self.drone.telemetry.set_msg_publish_frequency(bp.Imu1Tel, 100)
+        msgs.append(bp.Imu1Tel)
         self.drone.telemetry.set_msg_publish_frequency(bp.DepthTel, 10)
         msgs.append(bp.DepthTel)
-        self.drone.telemetry.set_msg_publish_frequency(bp.DvlVelocityTel, 10)
+        self.drone.telemetry.set_msg_publish_frequency(bp.DvlVelocityTel, 25)
         msgs.append(bp.DvlVelocityTel)
         self.drone.telemetry.set_msg_publish_frequency(bp.PositionEstimateTel, 10)
         msgs.append(bp.PositionEstimateTel)
 
         self.drone.telemetry.add_msg_callback(msgs, self.parse_be_message, raw=True)
         self.telemetry_messages = [i.__name__ for i in msgs]
+
+    def log_message(self, msg_name, data, timestamp=None):
+        mcap_channel_ids = self.foxglove_bridge.channel_ids
+        foxglove_channel_ids = self.foxglove_bridge.channel_ids
+        if timestamp is None:
+            timestamp = time.time_ns()
+
+        if msg_name in mcap_channel_ids:
+            chan_id = mcap_channel_ids[msg_name]
+            self.mcap_logger.log_message(msg_name, message=data, timestamp=timestamp)
+
+            # self.foxglove_bridge.writer._writer.add_message(
+            #     channel_id=chan_id, log_time=timestamp, publish_time=timestamp, data=data)
+            # self.foxglove_bridge.writer.write_message(
+            #     topic=f"blueye.protocol{msg_name}", message=data, publish_time=timestamp, log_time=timestamp)
+        if msg_name in foxglove_channel_ids:
+            try:
+                asyncio.run(
+                    self.foxglove_bridge.server.send_message(
+                        foxglove_channel_ids[msg_name], timestamp, data)
+                )
+            except TypeError as e:
+                self.foxglove_bridge.logger.info(
+                    f"Error sending message for {msg_name}: {e}")
+        else:
+            self.foxglove_bridge.logger.info(
+                f"Warning: Channel ID not found for message type: {msg_name}")
+                
+
 
     def parse_be_message(self, payload_msg_name, data):
         channel_ids = self.foxglove_bridge.channel_ids
@@ -329,27 +360,27 @@ class DroneTelemetry:
             #     channel_id=chan_id, log_time=timestamp, publish_time=timestamp, data=data)
             # self.foxglove_bridge.writer.write_message(
             #     topic=f"blueye.protocol{payload_msg_name}", message=data, publish_time=timestamp, log_time=timestamp)
-            try:
-                asyncio.run(
-                    self.foxglove_bridge.server.send_message(
-                        channel_ids[payload_msg_name], timestamp, data)
-                )
-
-            except TypeError as e:
-                self.foxglove_bridge.logger.info(
-                    f"Error sending message for {payload_msg_name}: {e}")
-        else:
-            self.foxglove_bridge.logger.info(
-                f"Warning: Channel ID not found for message type: {payload_msg_name}")
+        #     try:
+        #         asyncio.run(
+        #             self.foxglove_bridge.server.send_message(
+        #                 channel_ids[payload_msg_name], timestamp, data)
+        #         )
+        #
+        #     except TypeError as e:
+        #         self.foxglove_bridge.logger.info(
+        #             f"Error sending message for {payload_msg_name}: {e}")
+        # else:
+        #     self.foxglove_bridge.logger.info(
+        #         f"Warning: Channel ID not found for message type: {payload_msg_name}")
 
 
 # Example usage
 if __name__ == "__main__":
-    telem = DroneTelemetry("output.mcap")
-    telem.start()
+    telem = DroneTelemetry("log_21_03.mcap")
+    telem.start_mcap_logger()
 
     while True:
         inn = input("Stop? [y/N]")
         if inn == "y":
             break
-    telem.stop()
+    telem.stop_mcap_logger()

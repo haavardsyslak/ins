@@ -5,7 +5,7 @@ from sigma_points import SigmaPoints
 # from dataclasses import dataclass
 # from typing import Callable
 from models import ImuModelLie, ImuModelQuat, Measurement
-from state import LieState, State
+from state import LieState, NominalState
 from scipy.spatial.transform import Rotation as Rot
 from sigma_points import MwereSigmaPoints
 
@@ -54,7 +54,7 @@ class QUKF:
         for i, delta_x_aug in enumerate(delta_x_aug_sigmas):
             delta_x = delta_x_aug[:self.dim_x]
             w = delta_x_aug[self.dim_x:]
-            xi = State.add_error_state(self.x, delta_x)
+            xi = NominalState.add_error_state(self.x, delta_x)
             sigmas[i] = self.model.f(xi, u, dt, w).as_vec()
 
 
@@ -70,13 +70,13 @@ class QUKF:
         for i, sigma in enumerate(sigmas):
             # x = State.from_vec(sigma)
             # dx = x.to_error_state(x_bar)
-            dx = State.to_error_state(sigma, x_bar)
+            dx = NominalState.to_error_state(sigma, x_bar)
             P += self.sigma_points.Wc[i] * np.outer(dx, dx)
             self.delta_sigmas[i] = dx
 
         # TODO: when biases are added, we need to add the noise for the biases to the biases
         self.P = (P + P.T) / 2
-        self.x = State.from_vec(x_bar)
+        self.x = NominalState.from_vec(x_bar)
         self.propgated_sigmas = sigmas
 
     def update(self, measurement: Measurement, dt: float, R=None):
@@ -88,7 +88,7 @@ class QUKF:
         sigmas_z = np.zeros((self.sigma_points.num_sigmas, measurement.dim))
         for i, sigma in enumerate(self.propgated_sigmas):
             # x = State.add_error_state(self.x, sigma)
-            x = State.from_vec(sigma)
+            x = NominalState.from_vec(sigma)
             sigmas_z[i] = measurement.h(x)
 
 
@@ -106,7 +106,7 @@ class QUKF:
         sigmas = self.propgated_sigmas
         # print(self.sigma_points.Wc)
         for i in range(self.sigma_points.num_sigmas):
-            dx = State.to_error_state(sigmas[i], x)
+            dx = NominalState.to_error_state(sigmas[i], x)
             dz = sigmas_z[i] - z_hat
             Pxz += self.sigma_points.Wc[i] * np.outer(dx, dz)
             S += self.sigma_points.Wc[i] * np.outer(dz, dz)
@@ -122,7 +122,7 @@ class QUKF:
         print(K)
 
         dx = K @ innov
-        self.x = State.add_error_state(self.x, dx)
+        self.x = NominalState.add_error_state(self.x, dx)
         P = self.P - K @ S @ K.T
         self.P = (P + P.T) / 2
 

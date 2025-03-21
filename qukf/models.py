@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
-from state import LieState, State
+from state import LieState, NominalState
 from lie import SO3, SU2
 import scipy
 from abc import ABC, abstractmethod
@@ -27,7 +27,7 @@ class ImuModelQuat:
             self.gyro_std**2 * np.eye(3),
             self.acc_std**2 * np.eye(3))
 
-    def f(self, state: State, u: np.ndarray, dt: float, w: np.ndarray):
+    def f(self, state: NominalState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
         acc = (u[3:6] * 9.81) + w[3:6]
         acc_n_frame = state.ori.R @ acc - self.g
@@ -37,7 +37,7 @@ class ImuModelQuat:
         v = state.vel + acc_n_frame * dt
         p = state.pos + state.vel * dt + 0.5 * acc_n_frame * dt**2
 
-        return State(ori=q, vel=v, pos=p)
+        return NominalState(ori=q, vel=v, pos=p)
 
 
 @dataclass
@@ -142,7 +142,7 @@ class DvlMeasurement(Measurement):
     def z(self, val: np.ndarray):
         self._z = val
 
-    def h(self, state: State) -> np.ndarray:
+    def h(self, state: NominalState) -> np.ndarray:
         # return state.R.T @ state.vel
 
         return state.ori.R.T @ state.vel
