@@ -131,7 +131,6 @@ class McapLogger:
         while self._running or not self.queue.empty():
             try:
                 topic, message, timestamp = self.queue.get(timeout=0.1)
-                print(topic)
                 with self.lock:
                     self.writer._writer.add_message(
                         channel_id=self.channel_ids[topic],
@@ -360,27 +359,29 @@ class DroneTelemetry:
             #     channel_id=chan_id, log_time=timestamp, publish_time=timestamp, data=data)
             # self.foxglove_bridge.writer.write_message(
             #     topic=f"blueye.protocol{payload_msg_name}", message=data, publish_time=timestamp, log_time=timestamp)
-        #     try:
-        #         asyncio.run(
-        #             self.foxglove_bridge.server.send_message(
-        #                 channel_ids[payload_msg_name], timestamp, data)
-        #         )
-        #
-        #     except TypeError as e:
-        #         self.foxglove_bridge.logger.info(
-        #             f"Error sending message for {payload_msg_name}: {e}")
-        # else:
-        #     self.foxglove_bridge.logger.info(
-        #         f"Warning: Channel ID not found for message type: {payload_msg_name}")
+            try:
+                asyncio.run(
+                    self.foxglove_bridge.server.send_message(
+                        channel_ids[payload_msg_name], timestamp, data)
+                )
+
+            except TypeError as e:
+                self.foxglove_bridge.logger.info(
+                    f"Error sending message for {payload_msg_name}: {e}")
+        else:
+            self.foxglove_bridge.logger.info(
+                f"Warning: Channel ID not found for message type: {payload_msg_name}")
 
 
 # Example usage
 if __name__ == "__main__":
-    telem = DroneTelemetry("log_21_03.mcap")
+    telem = DroneTelemetry("asdf.mcap")
     telem.start_mcap_logger()
+    telem.start_floxglove_bridge()
 
     while True:
         inn = input("Stop? [y/N]")
         if inn == "y":
             break
     telem.stop_mcap_logger()
+    telem.stop_foxglove_bridge()
