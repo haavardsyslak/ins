@@ -2,6 +2,7 @@ from orientation import RotationQuaterion
 import numpy as np
 import scipy
 from mcap.reader import make_reader
+from mcap_protobuf.reader import read_protobuf_messages
 from state import LieState, NominalState
 from sigma_points import SigmaPoints, JulierSigmaPoints, MwereSigmaPoints, SimplexSigmaPoints
 from scipy.spatial.transform import Rotation as Rot
@@ -139,7 +140,6 @@ def main():
 
 def wrap_angle(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
-
 
 def log_pos(msg):
     pos = json.loads(msg.decode())
