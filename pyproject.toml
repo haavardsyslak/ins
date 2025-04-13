@@ -7,11 +7,14 @@ requires-python = ">=3.11"
 dependencies = [
     "blueye-protocol==2.7.0",
     "blueye-sdk>=2.3.0",
+    "foxglove-schemas-protobuf>=0.3.0",
     "foxglove-websocket>=0.1.2",
     "matplotlib>=3.10.0",
+    # "manifpy>=0.1.0",
     "mcap>=1.2.2",
     "mcap-protobuf-support>=0.5.2",
     "numpy>=1.26.4",
+    "pandas>=2.2.3",
     "scipy>=1.15.1",
     "tqdm>=4.67.1",
 ]
