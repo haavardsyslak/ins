@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
 import numpy as np
-from scipy.spatial.transform import Rotation as Rot
-from state import LieState
+from .state import LieState
 from lie import SO3
 import scipy
 from abc import ABC, abstractmethod
 from typing import Optional
+import manifpy as manif
 
 
 @dataclass
@@ -18,9 +18,9 @@ class ImuModel:
     gyro_bias_std: float
     gyro_bias_p: float
 
-    acc_std: float
-    acc_bias_std: float
-    acc_bias_p: float
+    accel_std: float
+    accel_bias_std: float
+    accel_bias_p: float
 
     Q: "np.ndarray[6, 6]" = field(init=False, repr=False)
 
@@ -28,18 +28,23 @@ class ImuModel:
         self.g = np.array((0, 0, 9.822))
         self.Q = scipy.linalg.block_diag(
             self.gyro_std**2 * np.eye(3),
-            self.acc_std**2 * np.eye(3),
+            self.accel_std**2 * np.eye(3),
             # self.gyro_bias_std**2 * np.eye(3),
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
-        acc = (-u[3:6] * 9.81) + w[3:6]
-        R = state.R @ SO3.exp(omega * dt)
-        self.g = np.array([0, 0, state.g])
-        p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) + self.g) * dt**2
-        v = state.vel + ((state.R @ acc) + self.g) * dt
-        return LieState(R=R, vel=v, pos=p, g=state.g)
+        a_m = (-u[3:6] * 9.81) + w[3:6]
+        R = state.extended_pose.rotation()
+        acc = R @ a_m + state.g
+        theta = omega * dt
+        d_vel = acc * dt
+        d_pos = state.extended_pose.linearVelocity() * dt * .5 * acc * dt**2
+        # self.g = np.array([0, 0, state.g])
+        xi = np.concatenate([d_pos, theta, d_vel])
+        tangent = manif.SE_2_3Tangent(xi)
+        new_extended_pose = state.extended_pose.rplus(tangent)
+        return LieState(extended_pose=new_extended_pose, g=state.g)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
@@ -47,21 +52,18 @@ class ImuModel:
     @classmethod
     def phi(cls, state, xi):
         """Takes points in the euclidean space onto the manifold (Exp map)"""
-        R = SO3.exp(xi[:3]) @ state.R
-        v = state.vel + xi[3:6]
-        p = state.pos + xi[6:9]
-        g = state.g + xi[-1]
-        return LieState(R=R, vel=v, pos=p, g=g)
+        tangent = manif.SE_2_3Tangent(xi[:9])
+        new_extended_pose = state.extended_pose.rplus(tangent)
+        g = state.g + xi[-3:]
+        return LieState(extended_pose=new_extended_pose, g=g)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
-        rot = SO3.log(state_hat.R.dot(state.R.T))
-        v = state_hat.vel - state.vel
-        p = state_hat.pos - state.pos
-        g = state_hat.g - state.g
+        tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
+        dg = state.g - state_hat.g
 
-        return np.hstack([rot, v, p])
+        return np.hstack([tangent, dg])
 
     def left_phi(cls, state, xi):
         delta_rot = SO3.exp(xi[:3])
