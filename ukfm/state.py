@@ -12,7 +12,7 @@ class LieState:
     g: np.ndarray = field(default_factory=lambda: np.array([0, 0, 9.822]))
 
     def dof(self):
-        return 9 + len(self.g)
+        return 9
 
     def to_global_position(self, initial_global_pos):
         lat0 = initial_global_pos[0]
