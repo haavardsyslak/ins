@@ -29,20 +29,24 @@ class ImuModel:
         self.Q = scipy.linalg.block_diag(
             self.gyro_std**2 * np.eye(3),
             self.accel_std**2 * np.eye(3),
+            # 1e-5 * np.eye(3),
             # self.gyro_bias_std**2 * np.eye(3),
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
-        a_m = (-u[3:6] * 9.81) + w[3:6]
+        a_m = (u[3:6] * 9.822)# + w[3:6]
+        a_m[2] *= -1
+        a_m += w[3:6]
         R = state.extended_pose.rotation()
         acc = R @ a_m + state.g
+
         theta = omega * dt
         d_vel = acc * dt
-        d_pos = state.extended_pose.linearVelocity() * dt * .5 * acc * dt**2
-        # self.g = np.array([0, 0, state.g])
+        d_pos = state.extended_pose.linearVelocity() * dt #+ .5 * acc * dt**2
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
+
         new_extended_pose = state.extended_pose.rplus(tangent)
         return LieState(extended_pose=new_extended_pose, g=state.g)
 
@@ -53,17 +57,20 @@ class ImuModel:
     def phi(cls, state, xi):
         """Takes points in the euclidean space onto the manifold (Exp map)"""
         tangent = manif.SE_2_3Tangent(xi[:9])
-        new_extended_pose = state.extended_pose.rplus(tangent)
+        new_extended_pose = state.extended_pose.lplus(tangent)
         g = state.g + xi[-3:]
-        return LieState(extended_pose=new_extended_pose, g=g)
+        return LieState(extended_pose=new_extended_pose, g=state.g)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
-        tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
+        tangent = state.extended_pose.lminus(state_hat.extended_pose).coeffs()
+        # tangent = state_hat.extended_pose.lminus(state.extended_pose).coeffs()
         dg = state.g - state_hat.g
 
         return np.hstack([tangent, dg])
+
+        # return np.hstack([tangent, dg])
 
     def left_phi(cls, state, xi):
         delta_rot = SO3.exp(xi[:3])
@@ -113,7 +120,8 @@ class DvlMeasurement(Measurement):
         self._z = val
 
     def h(self, state: LieState) -> np.ndarray:
-        return state.R.T @ state.vel
+        R = state.extended_pose.rotation()
+        return R.T @ state.extended_pose.linearVelocity()
 
 
 class Magneotmeter(Measurement):
@@ -154,4 +162,26 @@ class DepthMeasurement(Measurement):
         self._z = val
 
     def h(self, state: LieState) -> float:
-        return state.pos[-1]
+        return state.extended_pose.translation()[-1]
+
+
+class GnssMeasurement(Measurement):
+    # GNSS measurement needs to be given in the local frame (x, y)
+    def __init__(self, R, z: Optional[np.ndarray] = None):
+        self.R = R
+        self.dim = 2
+        if z is not None:
+            self._z = z
+
+    @property
+    def z(self) -> np.ndarray:
+        return self._z
+
+    @z.setter
+    def z(self, val: np.ndarray):
+        self._z = val
+
+    def h(self, state: LieState):
+        return state.extended_pose.translation()[:2]
+
+
