@@ -1,6 +1,6 @@
 import numpy as np
 from sigma_points import SigmaPoints
-from .models import ImuModel
+from .models import ImuModel, DvlMeasurement
 from .state import LieState
 
 
@@ -88,6 +88,8 @@ class UKFM:
             R = measurement.R
 
         z = measurement.z
+        if type(measurement) is DvlMeasurement:
+            z = self.x.extended_pose.rotation().T @ measurement.z
 
         xis = self.points.compute_sigma_points(np.zeros((self.dim_x)), self.P)
 
@@ -111,7 +113,6 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-        from .models import DvlMeasurement
         if type(measurement) is DvlMeasurement:
             print("innov: ", innov)
             print("xi_plus: ", xi_plus[-3:])

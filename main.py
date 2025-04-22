@@ -106,7 +106,7 @@ def run_ukf(ukf, reader):
                 case "blueye.protocol.DvlVelocityTel":
                     vel = message.proto_msg.dvl_velocity.velocity
                     vel = np.array([vel.x, vel.y, vel.z])
-                    R_dvl = np.eye(3) * 2e-3
+                    R_dvl = np.eye(3) * 2e-19
                     # R_dvl[2] = 2.5e-3
                     measurement = DvlMeasurement(R_dvl, vel)
                     ukf.update(measurement, dt)
@@ -128,6 +128,9 @@ def run_ukf(ukf, reader):
                     msg = make_proto_ukf_state(ukf.x)
                     topic = f"custom.{msg.__name__}"
                     logger.publish(topic, msg, message.log_time_ns)
+
+                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                    logger.publish(topic, message.proto_msg, message.log_time_ns)
 
                 case "blueye.protocol.PositionEstimateTel":
                     msg = make_location_fix(message)
@@ -195,6 +198,7 @@ def make_location_fix(message: bp.PositionEstimateTel):
 
 
 if __name__ == "__main__":
+    np.set_printoptions(precision=2, linewidth=999)
     global initial_global_pos
     # Create an instance of the reader
     reader = McapProtobufReader("mcap/log_square_05.04.mcap")
@@ -203,17 +207,23 @@ if __name__ == "__main__":
         continue
     # Read messages one by one
     pos, vel, heading, initial_global_position = get_initial_state(reader)
+    pos[0] = 0.0
+    pos[1] = 0.0
     print(heading)
     heading = wrap_plus_minis_pi(heading)
     print(heading)
     rot = Rot.from_euler("XYZ", [0, 0, heading])
     q = rot.as_quat(scalar_first=False)
-    vel = rot.as_matrix() @ vel
+    # vel = rot.as_matrix() @ vel
     extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("XYZ"))
-    g = np.array([0.0, 0.0, 9.822])
+    g = np.array([0.0, 0.0, -9.822])
     get_initial_state = ukfm.LieState(extended_pose, g=g)
-    P0 = np.eye(get_initial_state.dof()) * 1e-4
+    P0 = np.eye(get_initial_state.dof())
+    P0[0:3, 0:3] = 2.5e-3 * np.eye(3)
+    P0[3:6, 3:6] = 1e-6 * np.eye(3)
+    P0[6:9, 6:9] = 1e-8 * np.eye(3)
+    # P0[9:12, 9:12] = 1 * np.eye(3)
 
     ukf = ukfm.make_ukf(get_initial_state, P0)
     run_ukf(ukf, reader)

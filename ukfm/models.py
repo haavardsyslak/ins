@@ -43,7 +43,7 @@ class ImuModel:
 
         theta = omega * dt
         d_vel = R @ acc * dt
-        d_pos =  (state.extended_pose.linearVelocity() * dt + .5 * acc * dt**2)
+        d_pos = R @ state.extended_pose.linearVelocity() * dt # + .5 * R @ acc * dt**2)
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
 
@@ -70,25 +70,6 @@ class ImuModel:
         return tangent
 
         # return np.hstack([tangent, dg])
-
-    def left_phi(cls, state, xi):
-        delta_rot = SO3.exp(xi[:3])
-        J = SO3.left_jacobian(xi[:3])
-        R = state.R.dot(delta_rot)
-        v = state.R.dot(J.dot(xi[3:6])) + state.vel
-        p = state.R.dot(J.dot(xi[6:9])) + state.pos
-
-        return LieState(R=R, vel=v, pos=p)
-
-    def left_phi_inv(cls, state, state_hat):
-        dR = state.R.T @ state_hat.R
-        phi = SO3.log(dR)
-        J = SO3.left_jacobian_inv(phi)
-        dv = state.R.T.dot(state.vel - state_hat.vel)
-        dp = state.R.T.dot(state.pos - state_hat.pos)
-
-        return np.hstack([phi, J.dot(dv), J.dot(dp)])
-
 
 class Measurement(ABC):
     def __init__(self, R):
