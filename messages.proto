@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package custom;
+
+message CustomTel {
+  double timestamp = 1;
+  float temperature = 2;
+  float pressure = 3;
+  string status = 4;
+}
+
+message UkfState {
+  // Timestamp in nanoseconds since epoch (optional)
+  uint64 timestamp = 1;
+
+  // Position in meters, in the world frame
+  double position_x = 2;
+  double position_y = 3;
+  double position_z = 4;
+
+  // Orientation as a unit quaternion representing body-to-world rotation.
+  // That is, this quaternion rotates vectors from the body frame into the world
+  // frame. Format: (w,x, y, z) i.e scalar part first
+  double quaternion_w = 5;
+  double quaternion_x = 6;
+  double quaternion_y = 7;
+  double quaternion_z = 8;
+
+
+  // Linear velocity in m/s, in the world frame (or body frame – specify in
+  // usage)
+  double velocity_x = 9;
+  double velocity_y = 10;
+  double velocity_z = 11;
+
+  double heading = 12;
+
+  double g = 14;
+  double roll = 15;
+  double pitch = 16;
+}
