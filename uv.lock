@@ -425,6 +425,7 @@ dependencies = [
     { name = "mcap-protobuf-support" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pymap3d" },
     { name = "scipy" },
     { name = "tqdm" },
 ]
@@ -446,6 +447,7 @@ requires-dist = [
     { name = "mcap-protobuf-support", specifier = ">=0.5.2" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pymap3d", specifier = ">=3.1.0" },
     { name = "scipy", specifier = ">=1.15.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
@@ -741,6 +743,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1d/b2/31537cf4b1ca988837256c910a668b553fceb8f069bedc4b1c826024b52c/pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6", size = 172736 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc", size = 117552 },
+]
+
+[[package]]
+name = "pymap3d"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/2c/12ca273a905c245bdfdae07679f6cb65eefb07ee54d1313fac65598336b1/pymap3d-3.1.0.tar.gz", hash = "sha256:c1a83fc2732234b6763f0372ad2628dd24b13a1e6a64e9f7825be4112463f369", size = 47736 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/07/a2fff88ae09b86cfea037afcef6ba46974ae59c6f0b3def87859005efc3d/pymap3d-3.1.0-py3-none-any.whl", hash = "sha256:8231b7dde0289ae8e2681261a79c80a990dba0a4bdfc443717dd02d1fd37c522", size = 60563 },
 ]
 
 [[package]]
