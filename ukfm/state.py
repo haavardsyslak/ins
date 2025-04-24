@@ -7,12 +7,12 @@ import pymap3d as pm
 @dataclass
 class LieState:
     extended_pose: manif.SE_2_3
-    # gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
-    # acc_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    acc_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
     g: np.ndarray = field(default_factory=lambda: np.array([0, 0, 9.822]))
 
     def dof(self):
-        return 9
+        return 9 #+ len(self.gyro_bias)# + len(self.acc_bias)
 
     def to_global_position(self, initial_global_pos):
         lat0 = initial_global_pos[0]
