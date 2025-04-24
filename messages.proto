@@ -38,4 +38,7 @@ message UkfState {
   double g = 14;
   double roll = 15;
   double pitch = 16;
+  double gyro_bias_x = 17;
+  double gyro_bias_y = 18;
+  double gyro_bias_z = 19;
 }
