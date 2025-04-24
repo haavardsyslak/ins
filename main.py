@@ -2,7 +2,7 @@ from mcap_protobuf.reader import read_protobuf_messages
 import blueye.protocol as bp
 import numpy as np
 import ukfm
-from ukfm.models import DvlMeasurement, DepthMeasurement, GnssMeasurement, ImuModel
+from ukfm.models import DvlMeasurement, DepthMeasurement, GnssMeasurement, ImuModel, Magnetometer
 from scipy.spatial.transform import Rotation as Rot
 import manifpy as manif
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -52,7 +52,7 @@ def get_initial_state(reader):
     velocity = np.zeros(3)
     pos = np.zeros(3)
     heading = 0.0
-    global_pos = np.zeros(2)
+    global_pos = np.zeros(3)
 
     for message in reader:
         match message.topic:
@@ -76,7 +76,9 @@ def get_initial_state(reader):
             case "blueye.protocol.DepthTel":
                 if not first_dpeth_msg_received:
                     first_dpeth_msg_received = True
-                    pos[2] = message.proto_msg.depth.value
+                    depth = message.proto_msg.depth.value
+                    pos[2] = depth
+                    global_pos[2] = depth
 
         if first_dvl_msg_received and first_gnss_msg_received and first_dpeth_msg_received:
             return pos, velocity, heading, global_pos
@@ -85,6 +87,7 @@ def get_initial_state(reader):
 def run_ukf(ukf, reader):
     logger = FoxgloveLogger("testing.mcap")
     t = reader.get_next_message().log_time
+    n = 0
     while True:
         # time.sleep(0.001)
         message = reader.get_next_message()
@@ -96,6 +99,7 @@ def run_ukf(ukf, reader):
                 # messge.log_time
                 gyro = message.proto_msg.imu.gyroscope
                 accel = message.proto_msg.imu.accelerometer
+                mag = message.proto_msg.imu.magnetometer
                 u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
                 dt = (message.log_time - t).total_seconds()
                 t = message.log_time
@@ -103,11 +107,19 @@ def run_ukf(ukf, reader):
                 topic = f"blueye.protocol.{message.proto_msg.__name__}"
                 logger.publish(topic, message.proto_msg, message.log_time_ns)
 
+                # n += 1
+                # if n == 10:
+                #     R_mag = np.eye(3) *  1e-1
+                #     z = np.array([mag.x, mag.y, mag.z])
+                #     measurement = Magnetometer(R_mag, z)
+                #     ukf.update(measurement, dt)
+                #     n = 0
+
             case "blueye.protocol.DvlVelocityTel":
                 vel = message.proto_msg.dvl_velocity.velocity
                 vel = np.array([vel.x, vel.y, vel.z])
-                R_dvl = np.eye(3) * 2e-4
-                R_dvl[2] = 2e-4
+                R_dvl = np.eye(3) * 2e-5
+                # R_dvl[2] = 2e-3
                 # R_dvl[2] = 2.5e-3
                 measurement = DvlMeasurement(R_dvl, vel)
                 ukf.update(measurement, dt)
@@ -226,32 +238,32 @@ if __name__ == "__main__":
     extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("XYZ"))
     g = np.array([0.0, 0.0, -9.822])
-    gyro_bias = np.array([0.0, .0, 00])
-    x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias)
+    gyro_bias = np.array([0.0, 0.0, 0.003])
+    x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, initial_global_pos=initial_global_position)
     P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 2.5 * np.eye(3)
     P0[3:6, 3:6] = 1e-6 * np.eye(3)
     P0[6:9, 6:9] = 1e-3 * np.eye(3)
-    # P0[9:12, 9:12] = 1e-9 * np.eye(3)
-    # P0[12:15, 12:15] = 1e-5 * np.eye(3)
+    P0[9:12, 9:12] = 1e-4 * np.eye(3)
+    P0[12:15, 12:15] = 1e-4 * np.eye(3)
 
     model = ImuModel(
-        gyro_std=1e-2,
-        gyro_bias_std=4e-9,
-        gyro_bias_p=0.0001,
+        gyro_std=8e-2,
+        gyro_bias_std=4e-6,
+        gyro_bias_p=0.001,
         accel_std=1,
-        accel_bias_std=0.01,
+        accel_bias_std=0.0001,
         accel_bias_p=0.0001,
     )
     dim_x = x0.dof()  # State dimension
     dim_q = model.Q.shape[0]  # Process noise dimension
+
     points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
-    noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
+    noise_points = SigmaPoints(dim_q, alpha=4e-3, beta=2, kappa=3 - dim_q)
     # points = SigmaPoints(dim_x, alpha=1e-2, beta=2, kappa=3-dim_x)
     # noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3-dim_q)
 
     ukf = ukfm.UKFM(dim_x, dim_q, points, noise_points, model, x0, P0)
 
     run_ukf(ukf, reader)
-
 
