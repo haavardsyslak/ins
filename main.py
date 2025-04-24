@@ -82,76 +82,75 @@ def get_initial_state(reader):
 
 
 def run_ukf(ukf, reader):
-    try:
-        logger = FoxgloveLogger("testing.mcap")
-        t = reader.get_next_message().log_time
-        while True:
-            # time.sleep(0.001)
-            message = reader.get_next_message()
-            if message is None:
-                break
+    logger = FoxgloveLogger("testing.mcap")
+    t = reader.get_next_message().log_time
+    while True:
+        # time.sleep(0.001)
+        message = reader.get_next_message()
+        if message is None:
+            break
 
-            match message.topic:
-                case "blueye.protocol.CalibratedImuTel":
-                    # messge.log_time
-                    gyro = message.proto_msg.imu.gyroscope
-                    accel = message.proto_msg.imu.accelerometer
-                    u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
-                    dt = (message.log_time - t).total_seconds()
-                    t = message.log_time
-                    ukf.propagate(u, dt)
-                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                    logger.publish(topic, message.proto_msg, message.log_time_ns)
+        match message.topic:
+            case "blueye.protocol.CalibratedImuTel":
+                # messge.log_time
+                gyro = message.proto_msg.imu.gyroscope
+                accel = message.proto_msg.imu.accelerometer
+                u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
+                dt = (message.log_time - t).total_seconds()
+                t = message.log_time
+                ukf.propagate(u, dt)
+                topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                logger.publish(topic, message.proto_msg, message.log_time_ns)
 
-                case "blueye.protocol.DvlVelocityTel":
-                    vel = message.proto_msg.dvl_velocity.velocity
-                    vel = np.array([vel.x, vel.y, vel.z])
-                    R_dvl = np.eye(3) * 2e-19
-                    # R_dvl[2] = 2.5e-3
-                    measurement = DvlMeasurement(R_dvl, vel)
-                    ukf.update(measurement, dt)
-                    lat, lon, alt = ukf.x.to_global_position(initial_global_position)
-                    est_vel = ukf.x.extended_pose.linearVelocity()
+            case "blueye.protocol.DvlVelocityTel":
+                vel = message.proto_msg.dvl_velocity.velocity
+                vel = np.array([vel.x, vel.y, vel.z])
+                R_dvl = np.eye(3) * 2e-3
+                # R_dvl[2] = 5e-3
+                # R_dvl[2] = 2.5e-3
+                measurement = DvlMeasurement(R_dvl, vel)
+                ukf.update(measurement, dt)
+                lat, lon, alt = ukf.x.to_global_position(initial_global_position)
+                est_vel = ukf.x.extended_pose.linearVelocity()
 
-                    rot = Rot.from_matrix(ukf.x.extended_pose.rotation())
-                    location_fix = LocationFix(
-                        timestamp=make_proto_timestamp(message.log_time_ns),
-                        latitude=lat,
-                        longitude=lon,
-                        altitude=alt,
-                        position_covariance=ukf.P[:3, :3].flatten().tolist(),
-                        position_covariance_type=3,
-                    )
-                    topic = f"ukf.foxglove{location_fix.__name__}"
-                    logger.publish(topic, location_fix, message.log_time_ns, "foxglove.LocationFix")
+                location_fix = LocationFix(
+                    timestamp=make_proto_timestamp(message.log_time_ns),
+                    latitude=lat,
+                    longitude=lon,
+                    altitude=alt,
+                    position_covariance=ukf.P[:3, :3].flatten().tolist(),
+                    position_covariance_type=3,
+                )
+                topic = f"ukf.foxglove{location_fix.__name__}"
+                logger.publish(topic, location_fix, message.log_time_ns, "foxglove.LocationFix")
 
-                    msg = make_proto_ukf_state(ukf.x)
-                    topic = f"custom.{msg.__name__}"
-                    logger.publish(topic, msg, message.log_time_ns)
+                msg = make_proto_ukf_state(ukf.x)
+                topic = f"custom.{msg.__name__}"
+                logger.publish(topic, msg, message.log_time_ns)
 
-                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                    logger.publish(topic, message.proto_msg, message.log_time_ns)
+                topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                logger.publish(topic, message.proto_msg, message.log_time_ns)
 
-                case "blueye.protocol.PositionEstimateTel":
-                    msg = make_location_fix(message)
-                    topic = f"gnss.foxglove.{msg.__name__}"
-                    logger.publish(topic, msg, message.log_time_ns, "foxglove.LocationFix")
-                    heading = wrap_plus_minis_pi(message.proto_msg.position_estimate.heading)
-                    message.proto_msg.position_estimate.heading = np.rad2deg(heading)
-                    logger.publish(
-                        f"blueye.protocol.{message.proto_msg.__name__}", message.proto_msg, message.log_time_ns)
+            case "blueye.protocol.PositionEstimateTel":
+                msg = make_location_fix(message)
+                topic = f"gnss.foxglove.{msg.__name__}"
+                logger.publish(topic, msg, message.log_time_ns, "foxglove.LocationFix")
+                heading = wrap_plus_minis_pi(message.proto_msg.position_estimate.heading)
+                message.proto_msg.position_estimate.heading = np.rad2deg(heading)
+                logger.publish(
+                    f"blueye.protocol.{message.proto_msg.__name__}", message.proto_msg, message.log_time_ns)
 
-                    gnss_sensor = get_gnss_sensor(message.proto_msg)
+                gnss_sensor = get_gnss_sensor(message.proto_msg)
 
-                case "blueye.protocol.DepthTel":
-                    R_depth = 1e-12
-                    depth_meas = DepthMeasurement(R_depth)
-                    depth_meas.z = message.proto_msg.depth.value
-                    ukf.update(depth_meas, dt)
-                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                    logger.publish(topic, message.proto_msg, message.log_time_ns)
-    finally:
-        logger.close()
+            case "blueye.protocol.DepthTel":
+                R_depth = 1e-9
+                depth_meas = DepthMeasurement(R_depth)
+                depth_meas.z = message.proto_msg.depth.value
+                ukf.update(depth_meas, dt)
+                topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                logger.publish(topic, message.proto_msg, message.log_time_ns)
+    input("Enter to stop logger")
+    logger.close()
 
 
 def make_proto_ukf_state(state):
@@ -209,21 +208,20 @@ if __name__ == "__main__":
     pos, vel, heading, initial_global_position = get_initial_state(reader)
     pos[0] = 0.0
     pos[1] = 0.0
-    print(heading)
+
     heading = wrap_plus_minis_pi(heading)
-    print(heading)
     rot = Rot.from_euler("XYZ", [0, 0, heading])
     q = rot.as_quat(scalar_first=False)
-    # vel = rot.as_matrix() @ vel
+    vel = rot.as_matrix() @ vel
     extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("XYZ"))
     g = np.array([0.0, 0.0, -9.822])
     get_initial_state = ukfm.LieState(extended_pose, g=g)
     P0 = np.eye(get_initial_state.dof())
-    P0[0:3, 0:3] = 2.5e-3 * np.eye(3)
+    P0[0:3, 0:3] = 2.5 * np.eye(3)
     P0[3:6, 3:6] = 1e-6 * np.eye(3)
-    P0[6:9, 6:9] = 1e-8 * np.eye(3)
-    # P0[9:12, 9:12] = 1 * np.eye(3)
+    P0[6:9, 6:9] = 1e-3 * np.eye(3)
+    # P0[9:12, 9:12] = 1e-8 * np.eye(3)
 
     ukf = ukfm.make_ukf(get_initial_state, P0)
     run_ukf(ukf, reader)
