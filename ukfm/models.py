@@ -6,6 +6,7 @@ import scipy
 from abc import ABC, abstractmethod
 from typing import Optional
 import manifpy as manif
+from scipy.spatial.transform import Rotation as Rot
 
 
 @dataclass
@@ -39,14 +40,12 @@ class ImuModel:
         R = state.extended_pose.rotation()
         Rt = state.extended_pose.rotation().T
         acc = a_m + Rt @ self.g
-        # print(acc)
 
         theta = omega * dt
-        d_vel = R @ acc * dt
-        d_pos = R @ state.extended_pose.linearVelocity() * dt # + .5 * R @ acc * dt**2)
-        xi = np.concatenate([d_pos, theta, d_vel])
-        tangent = manif.SE_2_3Tangent(xi)
-
+        d_vel = acc * dt
+        d_pos = Rt @ state.extended_pose.linearVelocity() * dt #+ .5 * d_vel * dt
+        tangent = manif.SE_2_3Tangent(np.concatenate([d_pos, theta, d_vel]))
+        # d_vel = acc * dt
         new_extended_pose = state.extended_pose.rplus(tangent)
         return LieState(extended_pose=new_extended_pose)
 
@@ -58,18 +57,19 @@ class ImuModel:
         """Takes points in the euclidean space onto the manifold (Exp map)"""
         tangent = manif.SE_2_3Tangent(xi[:9])
         new_extended_pose = state.extended_pose.rplus(tangent)
-        g = state.g + xi[-3:]
+        # g = state.g + xi[-3:]
         return LieState(extended_pose=new_extended_pose)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
-        tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
-        # tangent = state_hat.extended_pose.rminus(state.extended_pose).coeffs()
+        # tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
+        tangent = state_hat.extended_pose.rminus(state.extended_pose).coeffs()
         # dg = state.g - state_hat.g
         return tangent
 
         # return np.hstack([tangent, dg])
+
 
 class Measurement(ABC):
     def __init__(self, R):
@@ -101,8 +101,8 @@ class DvlMeasurement(Measurement):
 
     def h(self, state: LieState) -> np.ndarray:
         R = state.extended_pose.rotation()
-        # return R.T @ state.extended_pose.linearVelocity()
-        return state.extended_pose.linearVelocity()
+        return R.T @ state.extended_pose.linearVelocity()
+        # return state.extended_pose.linearVelocity()
 
 
 class Magneotmeter(Measurement):

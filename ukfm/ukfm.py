@@ -88,8 +88,6 @@ class UKFM:
             R = measurement.R
 
         z = measurement.z
-        if type(measurement) is DvlMeasurement:
-            z = self.x.extended_pose.rotation().T @ measurement.z
 
         xis = self.points.compute_sigma_points(np.zeros((self.dim_x)), self.P)
 
@@ -113,9 +111,6 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-        if type(measurement) is DvlMeasurement:
-            print("innov: ", innov)
-            print("xi_plus: ", xi_plus[-3:])
 
         self.x = self.phi(self.x, xi_plus)
 
@@ -129,13 +124,13 @@ def make_ukf(x0: LieState, P0: np.ndarray):
     # Define the parameters for the UKF
     dim_x = x0.dof()  # State dimension
     dim_q = 6  # Process noise dimension
-    points = SigmaPoints(dim_x, alpha=1e-4, beta=2, kappa=3 - dim_x)
-    noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3 - dim_q)
+    points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
+    noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
     model = ImuModel(
-        gyro_std=1e-3,
+        gyro_std=1e-2,
         gyro_bias_std=0.01,
         gyro_bias_p=0.0001,
-        accel_std=10,
+        accel_std=1,
         accel_bias_std=0.01,
         accel_bias_p=0.0001,
     )
