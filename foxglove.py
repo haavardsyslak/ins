@@ -93,6 +93,7 @@ class AsyncFoxgloveServerWrapper:
     #     return fut.result()
 
     def stop(self):
+        self.server.close()
         self.loop.call_soon_threadsafe(self.loop.stop)
 
 
