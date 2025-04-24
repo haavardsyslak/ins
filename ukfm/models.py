@@ -6,7 +6,6 @@ import scipy
 from abc import ABC, abstractmethod
 from typing import Optional
 import manifpy as manif
-from wmm2020 import wmm
 from datetime import datetime
 
 
