@@ -2,6 +2,8 @@ from mcap_protobuf.writer import Writer
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import descriptor_pb2
 from foxglove_schemas_protobuf import LocationFix_pb2
+import inspect
+import sys
 import time
 from typing import Dict, Type, List
 from google.protobuf.message import Message as ProtoMessage
@@ -64,7 +66,7 @@ class AsyncFoxgloveServerWrapper:
         asyncio.set_event_loop(self.loop)
 
         async def start_server():
-            self.server = FoxgloveServer(host=host, port=port, name=name)
+            self.server = FoxgloveServer(host=host, port=port, name="Blueye SDK bridge")
             print(self.server)
             print("starting server")
             self.server.start()
@@ -83,7 +85,7 @@ class AsyncFoxgloveServerWrapper:
             self.server.send_message(channel_id, timestamp, data),
             self.loop
         )
-        fut.result()
+        return fut.result()
 
     # def add_schema(self, schema: Schema) -> int:
     #     fut = asyncio.run_coroutine_threadsafe(
@@ -137,9 +139,86 @@ class FoxgloveLogger:
             "type_name": type_name,
         }
 
+    def register_blueye_descriptors(self):
+        descriptors = {}
+
+        # Get the module corresponding to the namespace
+        module = sys.modules["blueye.protocol"]
+
+        # Iterate through all the attributes of the module
+
+        for name, obj in inspect.getmembers(module):
+            # Check if the object is a class, ends with 'Tel', and has a _meta attribute with pb
+            if (
+                inspect.isclass(obj)
+                and name.endswith("Tel")
+                and hasattr(obj, "_meta")
+                and hasattr(obj._meta, "pb")
+            ):
+                try:
+                    # Access the DESCRIPTOR
+                    descriptor = obj._meta.pb.DESCRIPTOR
+
+                    # Create a FileDescriptorSet
+                    file_descriptor_set = descriptor_pb2.FileDescriptorSet()
+
+                    # Add the descriptor and its dependencies
+                    add_file_descriptor_and_dependencies(descriptor.file, file_descriptor_set)
+
+                    # Serialize the FileDescriptorSet to binary
+                    serialized_data = file_descriptor_set.SerializeToString()
+
+                    # Base64 encode the serialized data
+                    # schema_base64 = base64.b64encode(serialized_data).decode("utf-8")
+
+                    # Store the serialized data in the dictionary
+                    descriptors[name] = serialized_data
+                except AttributeError as e:
+                    print(f"Skipping message: {name}: {e}")
+                    # Skip non-message types
+                    raise e
+
+    # Register channels and schemas after collecting them
+        for message_name, descriptor in descriptors.items():
+            topic = f"blueye.protocol.{message_name}"
+            schema_name = topic
+
+            channel = {
+                "topic": topic,
+                "encoding": "protobuf",
+                "schemaName": schema_name,
+                "schema": base64.b64encode(descriptor).decode("utf-8"),
+            }
+            chan_id = self.server.add_channel(channel)
+            # Store the chan_id in the map
+            self.server_channels[topic] = chan_id
+
+            # Register the schema with the writer
+            schema_id = self.writer._writer.register_schema(
+                name=schema_name,
+                encoding="protobuf",
+                data=descriptor,
+            )
+
+            self.schemas[topic] = schema_id
+
+            chan_id = self.writer._writer.register_channel(
+                schema_id=schema_id,
+                topic=topic,
+                message_encoding="protobuf",
+            )
+            self.topics.append(topic)
+            self.mcap_channels[topic] = chan_id
+
     def get_protobuf_descriptor(self, message):
         file_descriptor_set = descriptor_pb2.FileDescriptorSet()
-        descriptor = message.DESCRIPTOR
+        if hasattr(message, "DESCRIPTOR"):
+            descriptor = message.DESCRIPTOR
+        elif hasattr(message, "_meta") and hasattr(message._meta, "pb"):
+            descriptor = message._meta.pb.DESCRIPTOR
+        else:
+            raise TypeError(f"Cannot extract descriptor from message of type {type(message)}")
+
         add_file_descriptor_and_dependencies(descriptor.file, file_descriptor_set)
         serialized = file_descriptor_set.SerializeToString()
 
@@ -184,20 +263,35 @@ class FoxgloveLogger:
         timestamp_ns = timestamp_ns or self._get_timestamp_ns()
 
         if topic not in self.topics:
+            if type(msg) == bytes:
+                print("cannot auto register topic from bytes")
+                return
+
             self.register_topic(msg, topic, schema_name)
 
         # MCAP write
-        self.writer.write_message(
-            topic=topic,
-            message=msg,
-            log_time=timestamp_ns,
-            publish_time=timestamp_ns,
-        )
+        if type(msg) == bytes:
+            self.writer._writer.add_message(
+                channel_id=self.mcap_channels[topic],
+                data=msg,
+                log_time=timestamp_ns,
+                publish_time=timestamp_ns,
+            )
+
+        else:
+            self.writer.write_message(
+                topic=topic,
+                message=msg,
+                log_time=timestamp_ns,
+                publish_time=timestamp_ns,
+            )
 
         # Live stream
+        if type(msg) != bytes:
+            msg = msg.SerializeToString()
         if self.server:
             channel_id = self.server_channels[topic]
-            self.server.send_message(channel_id, timestamp_ns, msg.SerializeToString())
+            self.server.send_message(channel_id, timestamp_ns, msg)
 
     def close(self):
         if self.server:

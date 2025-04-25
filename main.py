@@ -238,7 +238,7 @@ if __name__ == "__main__":
     extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("XYZ"))
     g = np.array([0.0, 0.0, -9.822])
-    gyro_bias = np.array([0.0, 0.0, 0.003])
+    gyro_bias = np.array([0.0, 0.0, 0.00])
     x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, initial_global_pos=initial_global_position)
     P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 2.5 * np.eye(3)
@@ -249,12 +249,13 @@ if __name__ == "__main__":
 
     model = ImuModel(
         gyro_std=8e-2,
-        gyro_bias_std=4e-6,
+        gyro_bias_std=4e-9,
         gyro_bias_p=0.001,
         accel_std=1,
         accel_bias_std=0.0001,
         accel_bias_p=0.0001,
     )
+
     dim_x = x0.dof()  # State dimension
     dim_q = model.Q.shape[0]  # Process noise dimension
 
