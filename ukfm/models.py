@@ -30,13 +30,14 @@ class ImuModel:
         self.Q = scipy.linalg.block_diag(
             self.gyro_std**2 * np.eye(3),
             self.accel_std**2 * np.eye(3),
+            self.gyro_bias_std**2 * np.eye(3),
             # 1e-5 * np.eye(3),
             # self.gyro_bias_std**2 * np.eye(3),
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
-        omega = u[:3] + w[:3]
-        a_m = (-u[3:6] * 9.8) + w[3:6]
+        omega = u[:3] + w[:3] - state.gyro_bias 
+        a_m = (-u[3:6] * 9.78) - state.acc_bias + w[3:6]
         R = state.extended_pose.rotation()
         Rt = state.extended_pose.rotation().T
         acc = a_m + Rt @ self.g
@@ -47,7 +48,7 @@ class ImuModel:
         tangent = manif.SE_2_3Tangent(np.concatenate([d_pos, theta, d_vel]))
         # d_vel = acc * dt
         new_extended_pose = state.extended_pose.rplus(tangent)
-        return LieState(extended_pose=new_extended_pose)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=state.gyro_bias)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
@@ -59,19 +60,25 @@ class ImuModel:
         new_extended_pose = state.extended_pose.rplus(tangent)
         # g = state.g + xi[-3:]
         return LieState(extended_pose=new_extended_pose)
+        # gyro_bias = state.gyro_bias + xi[9:12]
+        # acc_bias = state.acc_bias + xi[12:15]
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
         # tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
-        tangent = state_hat.extended_pose.rminus(state.extended_pose).coeffs()
+        tangent = state.extended_pose.rminus(state_hat.extended_pose).coeffs()
         # dg = state.g - state_hat.g
         return tangent
+        # d_gyro_bias = state.gyro_bias - state_hat.gyro_bias
+        # d_acc_bias = state.acc_bias - state_hat.acc_bias
+        # return np.hstack([tangent, d_gyro_bias])
 
         # return np.hstack([tangent, dg])
 
 
 class Measurement(ABC):
+
     def __init__(self, R):
         self.R = R
 
@@ -103,6 +110,7 @@ class DvlMeasurement(Measurement):
         R = state.extended_pose.rotation()
         return R.T @ state.extended_pose.linearVelocity()
         # return state.extended_pose.linearVelocity()
+        # return R.T @ state.extended_pose.linearVelocity()
 
 
 class Magneotmeter(Measurement):

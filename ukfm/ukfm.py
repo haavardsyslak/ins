@@ -76,6 +76,7 @@ class UKFM:
 
         Q = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(xi_bar, xi_bar)
         self.P = P + Q
+        # self.P[9:12, 9:12] += self.model.Q[6:9, 6:9]
         self.P = (self.P + self.P.T) / 2
         self.x = x_pred
         # self.x = self.model.phi(x_pred, new_xi)
@@ -111,7 +112,9 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-
+        # if type(measurement) is DvlMeasurement:
+            # print("innov: ", innov)
+            # print("xi_plus: ", xi_plus[-3:])
         self.x = self.phi(self.x, xi_plus)
 
         self.P -= K @ S @ K.T
@@ -120,8 +123,9 @@ class UKFM:
         self.P = (self.P + self.P.T) / 2
 
 
-def make_ukf(x0: LieState, P0: np.ndarray):
+def make_ukf(x0: LieState, P0: np.ndarray, model):
     # Define the parameters for the UKF
+
     dim_x = x0.dof()  # State dimension
     dim_q = 6  # Process noise dimension
     points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)

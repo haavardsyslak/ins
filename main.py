@@ -2,7 +2,7 @@ from mcap_protobuf.reader import read_protobuf_messages
 import blueye.protocol as bp
 import numpy as np
 import ukfm
-from ukfm.models import DvlMeasurement, DepthMeasurement, GnssMeasurement
+from ukfm.models import DvlMeasurement, DepthMeasurement, GnssMeasurement, ImuModel
 from scipy.spatial.transform import Rotation as Rot
 import manifpy as manif
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -13,6 +13,7 @@ import pymap3d as pm
 from utils import wrap_plus_minis_pi
 from messages_pb2 import UkfState
 from datetime import datetime
+from sigma_points import SigmaPoints, SimplexSigmaPoints
 
 global global_initial_pos
 
@@ -57,8 +58,8 @@ def get_initial_state(reader):
         match message.topic:
             case "blueye.protocol.DvlVelocityTel":
                 if not first_dvl_msg_received:
-                    velocity = message.proto_msg.dvl_velocity.velocity
-                    vel = np.array([velocity.x, velocity.y, velocity.z])
+                    velocity_msg = message.proto_msg.dvl_velocity.velocity
+                    velocity = np.array([velocity_msg.x, velocity_msg.y, velocity_msg.z])
                     first_dvl_msg_received = True
 
             case "blueye.protocol.PositionEstimateTel":
@@ -78,7 +79,7 @@ def get_initial_state(reader):
                     pos[2] = message.proto_msg.depth.value
 
         if first_dvl_msg_received and first_gnss_msg_received and first_dpeth_msg_received:
-            return pos, vel, heading, global_pos
+            return pos, velocity, heading, global_pos
 
 
 def run_ukf(ukf, reader):
@@ -105,14 +106,15 @@ def run_ukf(ukf, reader):
             case "blueye.protocol.DvlVelocityTel":
                 vel = message.proto_msg.dvl_velocity.velocity
                 vel = np.array([vel.x, vel.y, vel.z])
-                R_dvl = np.eye(3) * 2e-3
-                # R_dvl[2] = 5e-3
+                R_dvl = np.eye(3) * 2e-4
+                R_dvl[2] = 2e-4
                 # R_dvl[2] = 2.5e-3
                 measurement = DvlMeasurement(R_dvl, vel)
                 ukf.update(measurement, dt)
                 lat, lon, alt = ukf.x.to_global_position(initial_global_position)
                 est_vel = ukf.x.extended_pose.linearVelocity()
 
+                rot = Rot.from_matrix(ukf.x.extended_pose.rotation())
                 location_fix = LocationFix(
                     timestamp=make_proto_timestamp(message.log_time_ns),
                     latitude=lat,
@@ -143,38 +145,44 @@ def run_ukf(ukf, reader):
                 gnss_sensor = get_gnss_sensor(message.proto_msg)
 
             case "blueye.protocol.DepthTel":
-                R_depth = 1e-9
+                R_depth = 1e-6
                 depth_meas = DepthMeasurement(R_depth)
                 depth_meas.z = message.proto_msg.depth.value
                 ukf.update(depth_meas, dt)
                 topic = f"blueye.protocol.{message.proto_msg.__name__}"
                 logger.publish(topic, message.proto_msg, message.log_time_ns)
-    input("Enter to stop logger")
+
+    input("Enter to close logger")
     logger.close()
 
 
 def make_proto_ukf_state(state):
 
+    extended_pose = state.extended_pose
     g = state.g[-1]
-    state = state.extended_pose
-    quat = state.coeffs()[3:7]
+    quat = extended_pose.coeffs()[3:7]
 
-    rot = Rot.from_matrix(state.rotation())
-    _, _, yaw = rot.as_euler("XYZ", degrees=True)
+    rot = Rot.from_matrix(extended_pose.rotation())
+    roll, pitch, yaw = rot.as_euler("XYZ", degrees=True)
 
     return UkfState(
-        position_x=state.x(),
-        position_y=state.y(),
-        position_z=state.z(),
+        position_x=extended_pose.x(),
+        position_y=extended_pose.y(),
+        position_z=extended_pose.z(),
         quaternion_w=quat[0],
         quaternion_x=quat[1],
         quaternion_y=quat[2],
         quaternion_z=quat[3],
-        velocity_x=state.vx(),
-        velocity_y=state.vy(),
-        velocity_z=state.vz(),
+        velocity_x=extended_pose.vx(),
+        velocity_y=extended_pose.vy(),
+        velocity_z=extended_pose.vz(),
         heading=yaw,
         g=g,
+        roll=roll,
+        pitch=pitch,
+        gyro_bias_x=state.gyro_bias[0],
+        gyro_bias_y=state.gyro_bias[1],
+        gyro_bias_z=state.gyro_bias[2],
     )
 
 
@@ -216,14 +224,32 @@ if __name__ == "__main__":
     extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("XYZ"))
     g = np.array([0.0, 0.0, -9.822])
-    get_initial_state = ukfm.LieState(extended_pose, g=g)
-    P0 = np.eye(get_initial_state.dof())
+    gyro_bias = np.array([0.0, .0, 00])
+    x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias)
+    P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 2.5 * np.eye(3)
     P0[3:6, 3:6] = 1e-6 * np.eye(3)
     P0[6:9, 6:9] = 1e-3 * np.eye(3)
-    # P0[9:12, 9:12] = 1e-8 * np.eye(3)
+    # P0[9:12, 9:12] = 1e-9 * np.eye(3)
+    # P0[12:15, 12:15] = 1e-5 * np.eye(3)
 
-    ukf = ukfm.make_ukf(get_initial_state, P0)
+    model = ImuModel(
+        gyro_std=1e-2,
+        gyro_bias_std=4e-9,
+        gyro_bias_p=0.0001,
+        accel_std=1,
+        accel_bias_std=0.01,
+        accel_bias_p=0.0001,
+    )
+    dim_x = x0.dof()  # State dimension
+    dim_q = model.Q.shape[0]  # Process noise dimension
+    points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
+    noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
+    # points = SigmaPoints(dim_x, alpha=1e-2, beta=2, kappa=3-dim_x)
+    # noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3-dim_q)
+
+    ukf = ukfm.UKFM(dim_x, dim_q, points, noise_points, model, x0, P0)
+
     run_ukf(ukf, reader)
 
 
