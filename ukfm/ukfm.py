@@ -1,6 +1,6 @@
 import numpy as np
 from sigma_points import SigmaPoints
-from .models import ImuModel, DvlMeasurement
+from .models import ImuModel, DvlMeasurement, Magnetometer
 from .state import LieState
 
 
@@ -112,9 +112,6 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-        # if type(measurement) is DvlMeasurement:
-            # print("innov: ", innov)
-            # print("xi_plus: ", xi_plus[-3:])
         self.x = self.phi(self.x, xi_plus)
 
         self.P -= K @ S @ K.T

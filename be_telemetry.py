@@ -3,6 +3,7 @@ import threading
 import time
 import base64
 import logging
+from foxglove import FoxgloveLogger
 from mcap_protobuf.writer import Writer
 from foxglove_websocket.server import FoxgloveServer
 from google.protobuf import descriptor_pb2
@@ -13,6 +14,10 @@ import blueye
 from blueye.sdk import Drone
 import blueye.protocol as bp
 from queue import Queue, Empty
+
+from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf import descriptor_pb2
+from foxglove_schemas_protobuf import LocationFix_pb2
 
 def add_file_descriptor_and_dependencies(file_descriptor, file_descriptor_set):
     """Recursively add descriptors and their dependencies to the FileDescriptorSet"""
@@ -278,29 +283,22 @@ class DroneTelemetry:
         self.drone = None
         self.callbacks = []
         self.telemetry_messages = []
+        self.foxglove_logger = FoxgloveLogger(self.filename)
+        # self.foxglove_logger.register_blueye_descriptors()
+        self._start_bridge()
         self._setup()
-        self.foxglove_bridge = FoxgloveBridge(telem_names=self.telemetry_messages)
-        self.mcap_logger = McapLogger(filename, telemetry_names=self.telemetry_messages)
 
-    def start_floxglove_bridge(self):
-        self.foxglove_bridge.start()
+    def _start_bridge(self):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s: [%(levelname)s] <%(name)s> %(message)s"))
+        self.logger = logging.getLogger("FoxgloveBridge")
+        self.logger.addHandler(handler)
+        self.logger.info("Starting Foxglove bridge")
 
-    def start_mcap_logger(self):
-        self.mcap_logger.start()
-
-    def start(self):
-        self.start_floxglove_bridge()
-        self.start_mcap_logger()
-
-    def stop_foxglove_bridge(self):
-        self.foxglove_bridge.stop()
-
-    def stop_mcap_logger(self):
-        self.mcap_logger.stop()
-
-    def stop(self):
-        self.mcap_logger.stop()
-        self.stop_foxglove_bridge()
+        self.logger_sdk = logging.getLogger(blueye.sdk.__name__)
+        self.logger_sdk.setLevel(logging.DEBUG)
+        self.logger_sdk.addHandler(handler)
 
     def _setup(self):
         msgs = []
@@ -319,69 +317,55 @@ class DroneTelemetry:
         self.drone.telemetry.add_msg_callback(msgs, self.parse_be_message, raw=True)
         self.telemetry_messages = [i.__name__ for i in msgs]
 
-    def log_message(self, msg_name, data, timestamp=None):
-        mcap_channel_ids = self.foxglove_bridge.channel_ids
-        foxglove_channel_ids = self.foxglove_bridge.channel_ids
-        if timestamp is None:
-            timestamp = time.time_ns()
+    def to_protobuf_message(self, sdk_msg):
+        """
+        Convert a Blueye SDK proto-plus message to a native protobuf message.
+        """
+        if hasattr(sdk_msg, "DESCRIPTOR"):
+            return sdk_msg  # already native protobuf
 
-        if msg_name in mcap_channel_ids:
-            chan_id = mcap_channel_ids[msg_name]
-            self.mcap_logger.log_message(msg_name, message=data, timestamp=timestamp)
+        if hasattr(sdk_msg, "_meta") and hasattr(sdk_msg._meta, "pb"):
+            pb_cls = sdk_msg._meta.pb
+            pb_msg = pb_cls()
+            for field in sdk_msg._meta.fields.values():
+                value = getattr(sdk_msg, field.name)
+                setattr(pb_msg, field.name, value)
+            return pb_msg
 
-            # self.foxglove_bridge.writer._writer.add_message(
-            #     channel_id=chan_id, log_time=timestamp, publish_time=timestamp, data=data)
-            # self.foxglove_bridge.writer.write_message(
-            #     topic=f"blueye.protocol{msg_name}", message=data, publish_time=timestamp, log_time=timestamp)
-        if msg_name in foxglove_channel_ids:
-            try:
-                asyncio.run(
-                    self.foxglove_bridge.server.send_message(
-                        foxglove_channel_ids[msg_name], timestamp, data)
-                )
-            except TypeError as e:
-                self.foxglove_bridge.logger.info(
-                    f"Error sending message for {msg_name}: {e}")
-        else:
-            self.foxglove_bridge.logger.info(
-                f"Warning: Channel ID not found for message type: {msg_name}")
-                
-
+        raise TypeError(f"Cannot convert {type(sdk_msg)} to Protobuf")
 
     def parse_be_message(self, payload_msg_name, data):
-        channel_ids = self.foxglove_bridge.channel_ids
-        if payload_msg_name in channel_ids:
+        # Now publish the real parsed message
+        # self.foxglove_logger.publish(topic, msg, timestamp, topic)
 
-            chan_id = channel_ids[payload_msg_name]
-            timestamp = time.time_ns()
-            self.mcap_logger.log_message(payload_msg_name, message=data, timestamp=timestamp)
-            # self.foxglove_bridge.writer._writer.add_message(
-            #     channel_id=chan_id, log_time=timestamp, publish_time=timestamp, data=data)
-            # self.foxglove_bridge.writer.write_message(
-            #     topic=f"blueye.protocol{payload_msg_name}", message=data, publish_time=timestamp, log_time=timestamp)
-            try:
-                asyncio.run(
-                    self.foxglove_bridge.server.send_message(
-                        channel_ids[payload_msg_name], timestamp, data)
-                )
+        proto_cls = getattr(blueye.protocol, payload_msg_name)._meta.pb
 
-            except TypeError as e:
-                self.foxglove_bridge.logger.info(
-                    f"Error sending message for {payload_msg_name}: {e}")
-        else:
-            self.foxglove_bridge.logger.info(
-                f"Warning: Channel ID not found for message type: {payload_msg_name}")
+        # Parse the raw bytes into a Protobuf message
+        msg = proto_cls()
+        msg.ParseFromString(data)
+
+        # Create a new protobuf message and copy fields
+        timestamp = time.time_ns()
+        topic = f"blueye.protocol.{msg.__name__}"
+        print(topic)
+        self.foxglove_logger.publish(topic, msg, timestamp)
+
+        msg = LocationFix_pb2.LocationFix(
+            timestamp=Timestamp(seconds=0, nanos=0),
+            latitude=63.430515,
+            longitude=10.395053,
+            altitude=0.0,
+        )
+        self.foxglove_logger.publish("locationFix", msg, time.time_ns(), "foxglove.LocationFix")
+
 
 
 # Example usage
 if __name__ == "__main__":
     telem = DroneTelemetry("asdf.mcap")
-    telem.start_mcap_logger()
-    telem.start_floxglove_bridge()
 
     while True:
         inn = input("Stop? [y/N]")
         if inn == "y":
             break
-    telem.stop_mcap_logger()
-    telem.stop_foxglove_bridge()
+    telem.foxglove_logger.close()
