@@ -120,12 +120,14 @@ class AttitudeError:
         return 2 * (quaterion[1:] / quaterion[0])
 
     @staticmethod
-    def from_rodrigues_param(arr: np.ndarray):
+    def from_rodrigues_param(arr: np.ndarray) -> RotationQuaterion:
         if len(arr) != 3:
             raise ValueError("Rodrigues parameter must be of length 3")
+        rot = Rot.from_rotvec(arr)
+        quat = rot.as_quat(scalar_first=True)  # Returns [x, y, z, w] (SciPy convention!)
 
-        norm_sq = np.linalg.norm(arr) ** 2
-        return (np.sqrt(4 + norm_sq)) * np.hstack((2, arr))
+    # SciPy returns (x, y, z, w) — we want (w, x, y, z) probably
+        return RotationQuaterion(eta=quat[0], epsilon=quat[1:])
 
 
 def quaternion_weighted_average(quats, weights):

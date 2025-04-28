@@ -1,8 +1,8 @@
 import numpy as np
 import scipy
 from dataclasses import dataclass, field
-from state import NominalState
-from orientation import RotationQuaterion
+from .state import NominalState
+from orientation import RotationQuaterion, AttitudeError
 from utils import skew
 from typing import Tuple, Optional
 from abc import ABC, abstractmethod
@@ -20,18 +20,18 @@ class ImuModel:
     This works as an IMU measures the change between two states,
     and not the state itself.."""
 
-    acc_std: float
-    acc_bias_std: float
-    acc_bias_p: float
+    accel_std: float
+    accel_bias_std: float
+    accel_bias_p: float
 
     gyro_std: float
     gyro_bias_std: float
     gyro_bias_p: float
 
-    accm_correction: 'np.ndarray[3, 3]' = field(default=np.eye(3))
-    gyro_correction: 'np.ndarray[3, 3]' = field(default=np.eye(3))
+    accel_correction: 'np.ndarray[3, 3]' = field(default_factory=lambda: np.eye(3))
+    gyro_correction: 'np.ndarray[3, 3]' = field(default_factory=lambda: np.eye(3))
 
-    g: 'np.ndarray[3]' = field(default=np.array([0, 0, 9.82]))
+    g: 'np.ndarray[3]' = field(default_factory=lambda: np.array([0, 0, 9.82]))
 
     Q_c: 'np.ndarray[12, 12]' = field(init=False, repr=False)
 
@@ -39,13 +39,13 @@ class ImuModel:
         def diag3(x):
             return np.diag([x] * 3)
 
-        accm_corr = self.accm_correction
+        accm_corr = self.accel_correction
         gyro_corr = self.gyro_correction
 
         self.Q_c = scipy.linalg.block_diag(
-            accm_corr @ diag3(self.accm_std**2) @ accm_corr.T,
+            accm_corr @ diag3(self.accel_std**2) @ accm_corr.T,
             gyro_corr @ diag3(self.gyro_std**2) @ gyro_corr.T,
-            diag3(self.accm_bias_std**2),
+            diag3(self.accel_bias_std**2),
             diag3(self.gyro_bias_std**2)
         )
 
@@ -55,17 +55,21 @@ class ImuModel:
         We assume the change in orientation is negligable when caculating
         predicted position and velicity
         """
-
+        omega = u[:3] - state.gyro_bias
+        a_m = (u[3:6] * 9.78) - state.acc_bias
         Rq = state.ori.R
-        omega = Rq @ (u[:3] - state.gyro_bias)
-        acc = Rq @ (u[3:] - state.acc_bias)
-        pos_pred = state.pos + dt * state.vel + 0.5 * dt**2 * acc
-        vel_pred = state.vel + dt * acc
+        acc = a_m - Rq.T @ self.g
 
-        delta_rot = RotationQuaterion.from_avec(dt * omega)
+        theta = omega * dt
+        d_vel = acc * dt
+
+        pos_pred = state.pos + Rq @ (dt * state.vel)  # + 0.5 * dt**2 * acc
+        vel_pred = state.vel + d_vel
+
+        delta_rot = AttitudeError.from_rodrigues_param(theta)
         ori_pred = state.ori.multiply(delta_rot)
 
-        acc_bias_pred = np.exp(-dt * self.accm_bias_p) * state.accm_bias
+        acc_bias_pred = np.exp(-dt * self.accel_bias_p) * state.acc_bias
         gyro_bias_pred = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias
 
         x_pred = NominalState(ori=ori_pred, pos=pos_pred, vel=vel_pred, gyro_bias=gyro_bias_pred,
@@ -80,16 +84,18 @@ class ImuModel:
         Get the continuous time state transition matrix, A_c
         """
         F_c = np.zeros((15, 15))
-        Rq = x_est_nom.ori.as_rotmat()
-        S_acc = skew(u.acc)
-        S_omega = skew(u.omega)
-        pa = self.accm_bias_p
+        Rq = x_est_nom.ori.R
+        omega = u[:3]
+        acc = u[3:]
+        S_acc = skew(acc)
+        S_omega = skew(omega)
+        pa = self.accel_bias_p
         pw = self.gyro_bias_p
 
         O3 = np.zeros((3, 3))
         I3 = np.eye(3)
         F_c = np.block([[O3, I3, O3, O3, O3],
-                        [O3, O3, -Rq @ S_acc, -Rq @ self.accm_correction, O3],
+                        [O3, O3, -Rq @ S_acc, -Rq @ self.accel_correction, O3],
                         [O3, O3, -S_omega, O3, -self.gyro_correction],
                         [O3, O3, O3, -pa * I3, O3],
                         [O3, O3, O3, O3, -pw * I3]])
@@ -102,7 +108,7 @@ class ImuModel:
 
         """
         G_c = np.zeros((15, 12))
-        Rq = state.ori.as_rotmat()
+        Rq = state.ori.R
 
         O3 = np.zeros((3, 3))
         I3 = np.eye(3)
@@ -128,12 +134,12 @@ class ImuModel:
         Then the descrete time matrices are extraxted using van loans method
 
         """
-        A_c = self.F_c(state, u)
+        F_c = self.F_c(state, u)
         G_c = self.get_error_G_c(state)
         GQGT_c = G_c @ self.Q_c @ G_c.T
 
-        VanLoanMatrix = scipy.linalg.expm(np.block([[-A_c, GQGT_c],
-                                                    [np.zeros((15, 15)), A_c.T]]) * dt)
+        VanLoanMatrix = scipy.linalg.expm(np.block([[-F_c, GQGT_c],
+                                                    [np.zeros((15, 15)), F_c.T]]) * dt)
 
         A_d = VanLoanMatrix[15:, 15:].T
         GQGT_d = A_d @ VanLoanMatrix[:15, 15:]
@@ -183,42 +189,113 @@ class GNSSMeasurement(Measurement):
 
 
 class DvlMeasurement(Measurement):
+    def __init__(self, R, z: Optional[np.ndarray] = None):
+        self.R = R
+        self.dim = 3
+        if z is None:
+            z = np.zeros(3)
+        elif len(z) != 3:
+            raise ValueError("Dvl measurement must have 3 elements")
+        else:
+            self._z = z
+
+    @property
+    def z(self):
+        return self._z
+
     def H(self, state: NominalState):
 
-        n, e1, e2, e3 = state.ori.as_vec()
-        v_x, v_y, v_z = state.vel
+        # n, e1, e2, e3 = state.ori.as_vec()
+        # v_x, v_y, v_z = state.vel
+        #
+        # # Jacobian wrt. error state (chain rule)
+        # X_dq = np.zeros((3, 15))
+        # Q_delta_theta = 0.5 * np.array([
+        #     [-e1, -e2, -e2],
+        #     [n, -e2, e2],
+        #     [e2, n, -e1],
+        #     [-e2, e1, n],
+        # ])
+        # X_dq[:6, :6] = np.eye(6)
+        # X_dq[6:9, 6:9] = Q_delta_theta
+        # # Initialize the Jacobian matrices
+        #
+        # # fmt: off
+        # H_q = np.array([
+        #     [-2*e2*v_z + 2*e3*v_y, 2*e2*v_y + 2*e3*v_z, 2*e1*v_y - 4*e2*v_x - 2*n*v_z, 2*e1*v_z - 4*e3*v_x + 2*n*v_y],
+        #     [2*e1*v_z - 2*e3*v_x, -4*e1*v_y + 2*e2*v_x + 2*n*v_z, 2*e1*v_x + 2*e3*v_z, 2*e2*v_z - 4*e3*v_y - 2*n*v_x],
+        #     [-2*e1*v_y + 2*e2*v_x, -4*e1*v_z + 2*e3*v_x - 2*n*v_y, -4*e2*v_z + 2*e3*v_y + 2*n*v_x, 2*e1*v_x + 2*e2*v_y]
+        #         ])
+        #
+        #
+        # H_v = np.array([
+        #     [-2*e2**2 - 2*e3**2 + 1, 2*e1*e2 + 2*e3*n, 2*e1*e3 - 2*e2*n],
+        #     [2*e1*e2 - 2*e3*n, -2*e1**2 - 2*e3**2 + 1, 2*e1*n + 2*e2*e3], 
+        #     [2*e1*e3 + 2*e2*n, -2*e1*n + 2*e2*e3, -2*e1**2 - 2*e2**2 + 1]
+        #         ])
+        # # fmt: on
+        #
+        # # Assemble the final Jacobian H_x
+        # H_x = np.zeros((3, 18))  # 6x6 matrix for H_x
+        # H_x[0:4, :] = H_q
+        # H_x[8:10, :] = H_v
+        #
+        R = state.ori.R  # Rotation matrix from world to body
+        v = state.vel   # Velocity in world frame
 
-        # Jacobian wrt. error state (chain rule)
-        X_dq = np.zeros(3, 18)
-        Q_delta_theta = 0.5 * np.array([
-            [-e1, -e2, -e2],
-            [n, -e2, e2],
-            [e2, n, -e1],
-            [-e2, e1, n],
-        ])
-        X_dq[:5, :5] = np.eye(6)
-        X_dq[6:9, 6:9] = Q_delta_theta
-        # Initialize the Jacobian matrices
+        # Skew-symmetric matrix of velocity
 
-        # fmt: off
-        H_q = np.array([
-            [-2*e2*v_z + 2*e3*v_y, 2*e2*v_y + 2*e3*v_z, 2*e1*v_y - 4*e2*v_x - 2*n*v_z, 2*e1*v_z - 4*e3*v_x + 2*n*v_y],
-            [2*e1*v_z - 2*e3*v_x, -4*e1*v_y + 2*e2*v_x + 2*n*v_z, 2*e1*v_x + 2*e3*v_z, 2*e2*v_z - 4*e3*v_y - 2*n*v_x],
-            [-2*e1*v_y + 2*e2*v_x, -4*e1*v_z + 2*e3*v_x - 2*n*v_y, -4*e2*v_z + 2*e3*v_y + 2*n*v_x, 2*e1*v_x + 2*e2*v_y]
-                ])
+        H = np.zeros((3, 16))  # 3 outputs (body frame velocities) vs 15 error states
+
+        # Partial derivative wrt orientation error (delta theta)
+        H[:, 6:9] = np.eye(3)
+
+        return H
+
+    def h(self, state: NominalState):
+        # R = state.ori.R
+        return state.vel
 
 
-        H_v = np.array([
-            [-2*e2**2 - 2*e3**2 + 1, 2*e1*e2 + 2*e3*n, 2*e1*e3 - 2*e2*n],
-            [2*e1*e2 - 2*e3*n, -2*e1**2 - 2*e3**2 + 1, 2*e1*n + 2*e2*e3], 
-            [2*e1*e3 + 2*e2*n, -2*e1*n + 2*e2*e3, -2*e1**2 - 2*e2**2 + 1]
-                ])
-        #fmt: on
+class DepthMeasurement(Measurement):
+    def __init__(self, R, z: Optional[float] = None):
+        self.R = np.atleast_1d(R).reshape(-1, 1)
+        self.dim = 1
+        if z is not None:
+            self._z = z
 
-        # Assemble the final Jacobian H_x
-        H_x = np.zeros((3, 18))  # 6x6 matrix for H_x
-        H_x[0:4, :] = H_q
-        H_x[8:10, :] = H_v
+    @property
+    def z(self) -> float:
+        return self._z
 
-        return H_x
+    @z.setter
+    def z(self, val):
+        self._z = val
 
+    def h(self, state: NominalState) -> float:
+        return state.pos[-1]
+
+    def H(self, state: NominalState) -> np.ndarray:
+        H = np.zeros((1, 15))
+        H[0, 2] = 1.0  # Only sensitive to z-position error
+        return H
+
+
+class GnssMeasurement(Measurement):
+    # GNSS measurement needs to be given in the local frame (x, y)
+    def __init__(self, R, z: Optional[np.ndarray] = None):
+        self.R = R
+        self.dim = 2
+        if z is not None:
+            self._z = z
+
+    @property
+    def z(self) -> np.ndarray:
+        return self._z
+
+    @z.setter
+    def z(self, val: np.ndarray):
+        self._z = val
+
+    def h(self, state: NominalState):
+        return state.extended_pose.translation()[:2]
