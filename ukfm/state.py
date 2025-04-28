@@ -1,31 +1,62 @@
 import numpy as np
-from dataclasses import dataclassstate
-from quaternion import RotationQuaterion, AttitudeError
-import json
-from scipy.spatial.transform import Rotation
+import manifpy as manif
+from dataclasses import dataclass, field
+import pymap3d as pm
+from datetime import datetime
+from pygeomag import geomag
 
 
 @dataclass
 class LieState:
-    R: np.ndarray
-    vel: np.ndarray
-    pos: np.ndarray
-    g: float
+    extended_pose: manif.SE_2_3
+    gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    acc_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    g: np.ndarray = field(default_factory=lambda: np.array([0, 0, 9.822]))
+    initial_global_pos: np.ndarray = field(default_factory=lambda: np.array(
+        [63.44163316666666,
+         10.417993,
+         0.09]))
 
-    def to_json(self) -> str:
-        q = Rotation.from_matrix(self.R).as_quat()
-        euler = Rotation.from_matrix(self.R).as_euler("XYZ")
+    def dof(self):
+        return 9 + len(self.gyro_bias) + len(self.acc_bias)
 
-        msg = {
-            "velocity": {"x": self.vel[0], "y": self.vel[1], "z": self.vel[2]},
-            "pose": {
-                "position": {"x": self.pos[0], "y": self.pos[1], "z": self.pos[2]},
-                "orientation": {"x": q[0], "y": q[1], "z": q[2], "w": q[3]},
-            },
-            "euler_angles": {"roll": euler[0], "pitch": euler[1], "yaw": euler[2]},
-            # "gyro_bias": {"x": self.gyro_bias[0], "y": self.gyro_bias[1], "z": self.gyro_bias[2]},
-            # "acc_bias": {"x": self.acc_bias[0], "y": self.acc_bias[1], "z": self.acc_bias[2]},
-            # "gravity": {"g": self.g},
-        }
+    def to_global_position(self, initial_global_pos):
+        lat0 = initial_global_pos[0]
+        long0 = initial_global_pos[1]
+        alt0 = 0.0
+        if len(initial_global_pos) == 3:
+            alt0 = initial_global_pos[2]
 
-        return json.dumps(msg)
+        pos = self.extended_pose.translation()
+        lat, lon, alt = pm.ned2geodetic(pos[0], pos[1], pos[2], lat0, long0, alt0)
+
+        return lat, lon, alt
+
+    def _datetime_to_decimal_year(self, dt: datetime) -> float:
+        year_start = datetime(dt.year, 1, 1)
+        next_year = datetime(dt.year + 1, 1, 1)
+        year_length = (next_year - year_start).total_seconds()
+        elapsed = (dt - year_start).total_seconds()
+        return dt.year + (elapsed / year_length)
+
+    def get_mag_field(self):
+        lat, long, alt = self.to_global_position(self.initial_global_pos)
+        date = self._datetime_to_decimal_year(datetime.today())
+
+        # Get magnetic field result
+        result = geomag.GeoMag().calculate(lat, long, alt, date)
+
+        # Extract NED components (in nanoTesla)
+        B_n = result.x * 1e-3  # North component
+        B_e = result.y * 1e-3  # East component
+        B_d = result.z * 1e-3  # Down component
+
+        # Combine into a vector
+        b_n = np.array([B_n, B_e, B_d])
+        print(b_n)
+        input()
+
+        return b_n
+
+
+

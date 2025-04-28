@@ -1,12 +1,7 @@
 import numpy as np
-import scipy
-from quaternion import RotationQuaterion, AttitudeError, average
 from sigma_points import SigmaPoints
-from dataclasses import dataclass
-from typing import Callable
-from models import ImuModel
-from state import LieState
-from scipy.spatial.transform import Rotation as Rot
+from .models import ImuModel, DvlMeasurement, Magnetometer
+from .state import LieState
 
 
 class UKFM:
@@ -40,9 +35,9 @@ class UKFM:
         self.P += 1e-9 * np.eye(self.P.shape[0])
 
         if self.Q is not None:
-            Q = self.Q * dt  # TOOO: need to get the discritized Q mat
+            Q = self.Q  # * dt  # TOOO: need to get the discritized Q mat
         else:
-            Q = self.model.Q * dt**2
+            Q = self.model.Q  # * dt**2
 
         w_q = np.zeros(self.dim_q)
         # Predict the nominal state
@@ -81,12 +76,13 @@ class UKFM:
 
         Q = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(xi_bar, xi_bar)
         self.P = P + Q
-        # self.P = (self.P + self.P.T) / 2
+        # self.P[9:12, 9:12] += self.model.Q[6:9, 6:9]
+        self.P = (self.P + self.P.T) / 2
         self.x = x_pred
         # self.x = self.model.phi(x_pred, new_xi)
 
     def update(self, measurement, dt, h=None, R=None):
-        self.P += 1e-8 * np.zeros_like(self.P)
+        self.P += 1e-8 * np.eye(self.P.shape[0])
         h = measurement.h
 
         if R is None:
@@ -109,17 +105,36 @@ class UKFM:
         new_xis = new_xis - z_pred_bar
 
         S = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(dz, dz) + R
-        Pxz = self.points.Wc_i * np.hstack([xis[:10].T, xis[10:].T]).dot(new_xis)
+        Pxz = self.points.Wc_i * np.hstack([xis[:self.dim_x].T, xis[self.dim_x:].T]).dot(new_xis)
         S_inv = np.linalg.inv(S)
 
         K = Pxz @ S_inv
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-
         self.x = self.phi(self.x, xi_plus)
 
         self.P -= K @ S @ K.T
 
         # Avoid non sysmetric matrices
         self.P = (self.P + self.P.T) / 2
+
+
+def make_ukf(x0: LieState, P0: np.ndarray, model):
+    # Define the parameters for the UKF
+
+    dim_x = x0.dof()  # State dimension
+    dim_q = 6  # Process noise dimension
+    points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
+    noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
+    model = ImuModel(
+        gyro_std=1e-2,
+        gyro_bias_std=0.01,
+        gyro_bias_p=0.0001,
+        accel_std=1,
+        accel_bias_std=0.01,
+        accel_bias_p=0.0001,
+    )
+    # Create an instance of the UKFM class
+    ukf = UKFM(dim_x, dim_q, points, noise_points, model, x0, P0)
+    return ukf
