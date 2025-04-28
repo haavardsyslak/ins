@@ -51,7 +51,7 @@ with open("location.mcap", "wb") as f:
 
 
 class AsyncFoxgloveServerWrapper:
-    def __init__(self, host="0.0.0.0", port=8766, name="Foxglove Python Logger"):
+    def __init__(self, host="0.0.0.0", port=8765, name="Foxglove Python Logger"):
         self.server = None
         self.thread = threading.Thread(target=self._start_loop,
                                        args=(host, port, name), daemon=True)
@@ -116,7 +116,7 @@ class FoxgloveLogger:
         self.f = open(mcap_path, "wb")
         self.writer = Writer(self.f)
         print("FoxgloveLogger initialized")
-        self.server = AsyncFoxgloveServerWrapper(host="0.0.0.0", port=8766,
+        self.server = AsyncFoxgloveServerWrapper(host="0.0.0.0", port=8765,
                                                  name="Foxglove Python Logger") if stream else None
         print("FoxgloveLogger")
         self.server_channels: Dict[str, int] = {}  # topic -> channel_id
@@ -224,17 +224,18 @@ class FoxgloveLogger:
 
         return serialized
 
-    def register_topic(self, message, topic, schema_name):
-
+    def register_topic(self, message, topic, schema_name=None):
         if schema_name is None:
-            schema_name = topic
+            schema_name = message.DESCRIPTOR.full_name  
+
+        if topic in self.topics:
+            return  
 
         self.topics.append(topic)
 
         descriptor = self.get_protobuf_descriptor(message)
-        # schema_base64 = base64.b64encode(descriptor).decode("utf-8")
-        message_name = message.__class__
-        # Register the schema with the writer
+
+        # Register schema for MCAP
         schema_id = self.writer._writer.register_schema(
             name=schema_name,
             encoding="protobuf",
@@ -242,56 +243,45 @@ class FoxgloveLogger:
         )
         self.schemas[topic] = schema_id
 
+        # Register channel for MCAP
         chan_id = self.writer._writer.register_channel(
-            schema_id=schema_id, topic=topic, message_encoding="protobuf"
+            schema_id=schema_id,
+            topic=topic,
+            message_encoding="protobuf",
         )
         self.mcap_channels[topic] = chan_id
 
-        schema_id = self.schemas[topic]
-
-        channel = {
-            "topic": topic,
-            "encoding": "protobuf",
-            "schemaName": schema_name,
-            "schema": base64.b64encode(descriptor).decode("utf-8"),
-        }
-
+        # Register channel for live Foxglove streaming
         if self.server:
-            self.server_channels[topic] = self.server.add_channel(channel)
+            channel = {
+                "topic": topic,
+                "encoding": "protobuf",
+                "schemaName": schema_name,
+                "schema": base64.b64encode(descriptor).decode("utf-8"),
+            }
+            server_chan_id = self.server.add_channel(channel)
+            self.server_channels[topic] = server_chan_id
 
     def publish(self, topic: str, msg: ProtoMessage, timestamp_ns: int = None, schema_name=None):
         timestamp_ns = timestamp_ns or self._get_timestamp_ns()
 
         if topic not in self.topics:
-            if type(msg) == bytes:
-                print("cannot auto register topic from bytes")
-                return
-
             self.register_topic(msg, topic, schema_name)
 
         # MCAP write
-        if type(msg) == bytes:
-            self.writer._writer.add_message(
-                channel_id=self.mcap_channels[topic],
-                data=msg,
-                log_time=timestamp_ns,
-                publish_time=timestamp_ns,
-            )
+        self.writer.write_message(
+            topic=topic,
+            message=msg,
+            log_time=timestamp_ns,
+            publish_time=timestamp_ns,
+        )
 
-        else:
-            self.writer.write_message(
-                topic=topic,
-                message=msg,
-                log_time=timestamp_ns,
-                publish_time=timestamp_ns,
-            )
-
-        # Live stream
-        if type(msg) != bytes:
-            msg = msg.SerializeToString()
         if self.server:
-            channel_id = self.server_channels[topic]
-            self.server.send_message(channel_id, timestamp_ns, msg)
+            channel_id = self.server_channels.get(topic)
+            if channel_id is not None:
+                self.server.send_message(channel_id, timestamp_ns, msg.SerializeToString())
+            else:
+                print(f"[warning] No channel id for topic {topic}")
 
     def close(self):
         if self.server:
