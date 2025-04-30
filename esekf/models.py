@@ -56,15 +56,15 @@ class ImuModel:
         predicted position and velicity
         """
         omega = u[:3] - state.gyro_bias
-        a_m = (u[3:6] * 9.78) - state.acc_bias
+        a_m = (-u[3:6] * 9.78) - state.acc_bias
         Rq = state.ori.R
-        acc = a_m - Rq.T @ self.g
+        acc = a_m + Rq.T @ self.g
 
         theta = omega * dt
         d_vel = acc * dt
 
         pos_pred = state.pos + Rq @ (dt * state.vel)  # + 0.5 * dt**2 * acc
-        vel_pred = state.vel + d_vel
+        vel_pred = state.vel + d_vel * dt
 
         delta_rot = AttitudeError.from_rodrigues_param(theta)
         ori_pred = state.ori.multiply(delta_rot)
@@ -95,8 +95,8 @@ class ImuModel:
         O3 = np.zeros((3, 3))
         I3 = np.eye(3)
         F_c = np.block([[O3, I3, O3, O3, O3],
-                        [O3, O3, -Rq @ S_acc, -Rq @ self.accel_correction, O3],
                         [O3, O3, -S_omega, O3, -self.gyro_correction],
+                        [O3, O3, -Rq @ S_acc, -Rq @ self.accel_correction, O3],
                         [O3, O3, O3, -pa * I3, O3],
                         [O3, O3, O3, O3, -pw * I3]])
         return F_c
@@ -248,7 +248,7 @@ class DvlMeasurement(Measurement):
         H = np.zeros((3, 16))  # 3 outputs (body frame velocities) vs 15 error states
 
         # Partial derivative wrt orientation error (delta theta)
-        H[:, 6:9] = np.eye(3)
+        H[:, 3:6] = np.eye(3)
 
         return H
 
@@ -276,8 +276,8 @@ class DepthMeasurement(Measurement):
         return state.pos[-1]
 
     def H(self, state: NominalState) -> np.ndarray:
-        H = np.zeros((1, 15))
-        H[0, 2] = 1.0  # Only sensitive to z-position error
+        H = np.zeros((1, 16))
+        H[0, 0] = 1  # Only sensitive to z-position error
         return H
 
 

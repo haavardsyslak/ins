@@ -43,9 +43,9 @@ class ErrorState:
     @staticmethod
     def from_vec(vec: np.ndarray) -> Self:
         return ErrorState(
-            theta=vec[:3],
-            pos=vec[3:6],
-            vel=vec[6:9],
+            pos=vec[:3],
+            vel=vec[3:6],
+            theta=vec[6:9],
             gyro_bias=vec[9:12],
             acc_bias=vec[12:15],
             # g=vec[15:17],

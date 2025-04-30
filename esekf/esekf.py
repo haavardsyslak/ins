@@ -33,8 +33,9 @@ class ESEFK:
         )
 
         Hx = np.zeros((self.x.dof() + 1, self.x.dof()))
-        Hx[:4, :3] = Q_d_theta
-        Hx[4:, 3:] = np.eye(12)
+        Hx[:6, :6] = np.eye(6)
+        Hx[6:10, 6:9] = Q_d_theta
+        Hx[10:, 9:] = np.eye(6)
         return Hx
 
 
@@ -54,11 +55,11 @@ class ESEFK:
 
         S = H @ P @ H.T + R
         K = (P @ H.T @ np.linalg.inv(S))
-        innovation = measurement.z - measurement.h(self.x)
+        z_pred = measurement.h(self.x)
+        innovation = measurement.z - z_pred
         innovation = np.atleast_1d(innovation).reshape(-1, 1)
 
         x_err = K @ innovation
-        print(x_err)
         self.x_err = ErrorState.from_vec(x_err.flatten())
 
         I_KH = np.eye(15) - K @ H
@@ -81,7 +82,7 @@ class ESEFK:
             pos=self.x.pos + self.x_err.pos,
             vel=self.x.vel + self.x_err.vel,
             gyro_bias=self.x.gyro_bias + self.x_err.gyro_bias,
-            acc_bias=self.x.acc_bias + self.x.acc_bias,
+            acc_bias=self.x.acc_bias + self.x_err.acc_bias,
         )
         # self.x.g = self.x.g + self.x_err.g
 

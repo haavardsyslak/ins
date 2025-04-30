@@ -119,13 +119,11 @@ def run_esekf(esekf, reader):
             case "blueye.protocol.DvlVelocityTel":
                 vel = message.proto_msg.dvl_velocity.velocity
                 vel = np.array([vel.x, vel.y, vel.z])
-                R_dvl = np.eye(3) * 2e-5
+                R_dvl = np.eye(3) * 2e-2
                 # R_dvl[2] = 2e-3
                 # R_dvl[2] = 2.5e-3
                 measurement = DvlMeasurement(R_dvl, vel)
-                print(esekf.x)
                 esekf.update(measurement, dt)
-                print(esekf.x)
                 lat, lon, alt = esekf.x.to_global_position(initial_global_position)
                 # est_vel = ukf.x.vel
 
@@ -160,7 +158,7 @@ def run_esekf(esekf, reader):
                 gnss_sensor = get_gnss_sensor(message.proto_msg)
 
             case "blueye.protocol.DepthTel":
-                R_depth = 1e-6
+                R_depth = 1e-4
                 depth_meas = DepthMeasurement(R_depth)
                 depth_meas.z = message.proto_msg.depth.value
                 # esekf.update(depth_meas, dt)
@@ -182,16 +180,16 @@ def make_proto_esekf_state(state):
     roll, pitch, yaw = rot.as_euler("XYZ", degrees=True)
 
     return UkfState(
-        position_x=extended_pose.x(),
-        position_y=extended_pose.y(),
-        position_z=extended_pose.z(),
+        position_x=pos[0],
+        position_y=pos[1],
+        position_z=pos[2],
         quaternion_w=quat[0],
         quaternion_x=quat[1],
         quaternion_y=quat[2],
         quaternion_z=quat[3],
-        velocity_x=extended_pose.vx(),
-        velocity_y=extended_pose.vy(),
-        velocity_z=extended_pose.vz(),
+        velocity_x=vel[0],
+        velocity_y=vel[1],
+        velocity_z=vel[2],
         heading=yaw,
         # g=g,
         roll=roll,
@@ -236,17 +234,19 @@ if __name__ == "__main__":
     heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("XYZ", [0, 0, heading])
     q = rot.as_quat(scalar_first=False)
-    vel = rot.as_matrix() @ vel
-    extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
+    # vel = rot.as_matrix() @ vel
+    # extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     g = np.array([0.0, 0.0, -9.822])
     gyro_bias = np.array([0.0, 0.0, 0.00])
     q = RotationQuaterion.from_vec(q)
     x0 = esekf.NominalState(ori=q, pos=pos, vel=vel, gyro_bias=np.array(
         [0., 0., 0.]), acc_bias=np.array([0., 0., 0.]))
+    print(x0)
     P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 2.5 * np.eye(3)
+    # P0[2, 2] = 0.1
     P0[3:6, 3:6] = 1e-6 * np.eye(3)
-    P0[6:9, 6:9] = 1e-3 * np.eye(3)
+    P0[6:9, 6:9] = 1e-9 * np.eye(3)
     P0[9:12, 9:12] = 1e-4 * np.eye(3)
     P0[12:15, 12:15] = 1e-4 * np.eye(3)
 
@@ -254,7 +254,7 @@ if __name__ == "__main__":
         gyro_std=8e-2,
         gyro_bias_std=4e-9,
         gyro_bias_p=0.001,
-        accel_std=1,
+        accel_std=10,
         accel_bias_std=0.0001,
         accel_bias_p=0.0001,
     )
