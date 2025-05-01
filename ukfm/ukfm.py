@@ -112,6 +112,7 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
+        # self.x = self.model.phi_up(self.x, xi_plus)
         self.x = self.phi(self.x, xi_plus)
 
         self.P -= K @ S @ K.T
@@ -128,11 +129,11 @@ def make_ukf(x0: LieState, P0: np.ndarray, model):
     points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
     noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
     model = ImuModel(
-        gyro_std=1e-2,
-        gyro_bias_std=0.01,
+        gyro_std=1e-4,
+        gyro_bias_std=0.00001,
         gyro_bias_p=0.0001,
-        accel_std=1,
-        accel_bias_std=0.01,
+        accel_std=10,
+        accel_bias_std=0.000001,
         accel_bias_p=0.0001,
     )
     # Create an instance of the UKFM class

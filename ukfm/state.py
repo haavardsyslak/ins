@@ -32,6 +32,18 @@ class LieState:
 
         return lat, lon, alt
 
+    def from_global_position(self, lat, lon):
+        lat0 = self.initial_global_pos[0]
+        long0 = self.initial_global_pos[1]
+        alt0 = 0.0
+        if len(self.initial_global_pos) == 3:
+            alt0 = self.initial_global_pos[2]
+
+        pos = pm.geodetic2ned(lat, lon, 0.0, lat0, long0, alt0)
+
+        return np.array([pos[0], pos[1]])
+
+
     def _datetime_to_decimal_year(self, dt: datetime) -> float:
         year_start = datetime(dt.year, 1, 1)
         next_year = datetime(dt.year + 1, 1, 1)
