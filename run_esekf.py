@@ -89,84 +89,86 @@ def run_esekf(esekf, reader):
     logger = FoxgloveLogger("testing.mcap")
     t = reader.get_next_message().log_time
     n = 0
-    while True:
-        # time.sleep(0.001)
-        message = reader.get_next_message()
-        if message is None:
-            break
+    try:
+        while True:
+            # time.sleep(0.001)
+            message = reader.get_next_message()
+            if message is None:
+                break
 
-        match message.topic:
-            case "blueye.protocol.CalibratedImuTel":
-                # messge.log_time
-                gyro = message.proto_msg.imu.gyroscope
-                accel = message.proto_msg.imu.accelerometer
-                mag = message.proto_msg.imu.magnetometer
-                u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
-                dt = (message.log_time - t).total_seconds()
-                t = message.log_time
-                esekf.propagate(u, dt)
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
+            match message.topic:
+                case "blueye.protocol.CalibratedImuTel":
+                    # messge.log_time
+                    gyro = message.proto_msg.imu.gyroscope
+                    accel = message.proto_msg.imu.accelerometer
+                    mag = message.proto_msg.imu.magnetometer
+                    u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
+                    dt = (message.log_time - t).total_seconds()
+                    t = message.log_time
+                    esekf.propagate(u, dt)
+                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                    logger.publish(topic, message.proto_msg, message.log_time_ns)
 
-                # n += 1
-                # if n == 10:
-                #     R_mag = np.eye(3) *  1e-1
-                #     z = np.array([mag.x, mag.y, mag.z])
-                #     measurement = Magnetometer(R_mag, z)
-                #     ukf.update(measurement, dt)
-                #     n = 0
+                    # n += 1
+                    # if n == 10:
+                    #     R_mag = np.eye(3) *  1e-1
+                    #     z = np.array([mag.x, mag.y, mag.z])
+                    #     measurement = Magnetometer(R_mag, z)
+                    #     ukf.update(measurement, dt)
+                    #     n = 0
 
-            case "blueye.protocol.DvlVelocityTel":
-                vel = message.proto_msg.dvl_velocity.velocity
-                vel = np.array([vel.x, vel.y, vel.z])
-                R_dvl = np.eye(3) * 2e-2
-                # R_dvl[2] = 2e-3
-                # R_dvl[2] = 2.5e-3
-                measurement = DvlMeasurement(R_dvl, vel)
-                esekf.update(measurement, dt)
-                lat, lon, alt = esekf.x.to_global_position(initial_global_position)
-                # est_vel = ukf.x.vel
+                case "blueye.protocol.DvlVelocityTel":
+                    vel = message.proto_msg.dvl_velocity.velocity
+                    vel = np.array([vel.x, vel.y, vel.z])
+                    R_dvl = np.eye(3) * 2e-7
+                    # R_dvl[2] = 2e-3
+                    # R_dvl[2] = 2.5e-3
+                    measurement = DvlMeasurement(R_dvl, vel)
+                    esekf.update(measurement, dt)
+                    lat, lon, alt = esekf.x.to_global_position(initial_global_position)
+                    # est_vel = ukf.x.vel
 
-                # rot = Rot.from_matrix(ukf.x.extended_pose.rotation())
-                location_fix = LocationFix(
-                    timestamp=make_proto_timestamp(message.log_time_ns),
-                    latitude=lat,
-                    longitude=lon,
-                    altitude=alt,
-                    position_covariance=esekf.P[:3, :3].flatten().tolist(),
-                    position_covariance_type=3,
-                )
-                topic = f"ukf.foxglove{location_fix.__name__}"
-                logger.publish(topic, location_fix, message.log_time_ns, "foxglove.LocationFix")
+                    # rot = Rot.from_matrix(ukf.x.extended_pose.rotation())
+                    location_fix = LocationFix(
+                        timestamp=make_proto_timestamp(message.log_time_ns),
+                        latitude=lat,
+                        longitude=lon,
+                        altitude=alt,
+                        position_covariance=esekf.P[:3, :3].flatten().tolist(),
+                        position_covariance_type=3,
+                    )
+                    topic = f"ukf.foxglove{location_fix.__name__}"
+                    logger.publish(topic, location_fix, message.log_time_ns, "foxglove.LocationFix")
 
-                msg = make_proto_esekf_state(esekf.x)
-                topic = f"custom.{msg.__name__}"
-                logger.publish(topic, msg, message.log_time_ns)
+                    msg = make_proto_esekf_state(esekf.x)
+                    topic = f"custom.{msg.__name__}"
+                    logger.publish(topic, msg, message.log_time_ns)
 
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
+                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                    logger.publish(topic, message.proto_msg, message.log_time_ns)
 
-            case "blueye.protocol.PositionEstimateTel":
-                msg = make_location_fix(message)
-                topic = f"gnss.foxglove.{msg.__name__}"
-                logger.publish(topic, msg, message.log_time_ns, "foxglove.LocationFix")
-                heading = wrap_plus_minis_pi(message.proto_msg.position_estimate.heading)
-                message.proto_msg.position_estimate.heading = np.rad2deg(heading)
-                logger.publish(
-                    f"blueye.protocol.{message.proto_msg.__name__}", message.proto_msg, message.log_time_ns)
+                case "blueye.protocol.PositionEstimateTel":
+                    msg = make_location_fix(message)
+                    topic = f"gnss.foxglove.{msg.__name__}"
+                    logger.publish(topic, msg, message.log_time_ns, "foxglove.LocationFix")
+                    heading = wrap_plus_minis_pi(message.proto_msg.position_estimate.heading)
+                    message.proto_msg.position_estimate.heading = np.rad2deg(heading)
+                    logger.publish(
+                        f"blueye.protocol.{message.proto_msg.__name__}", message.proto_msg, message.log_time_ns)
 
-                gnss_sensor = get_gnss_sensor(message.proto_msg)
+                    gnss_sensor = get_gnss_sensor(message.proto_msg)
 
-            case "blueye.protocol.DepthTel":
-                R_depth = 1e-4
-                depth_meas = DepthMeasurement(R_depth)
-                depth_meas.z = message.proto_msg.depth.value
-                # esekf.update(depth_meas, dt)
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
+                case "blueye.protocol.DepthTel":
+                    R_depth = 1e-4
+                    depth_meas = DepthMeasurement(R_depth)
+                    depth_meas.z = message.proto_msg.depth.value
+                    esekf.update(depth_meas, dt)
+                    topic = f"blueye.protocol.{message.proto_msg.__name__}"
+                    logger.publish(topic, message.proto_msg, message.log_time_ns)
 
-    input("Enter to close logger")
-    logger.close()
+    finally:
+        input("Enter to close logger")
+        logger.close()
 
 
 def make_proto_esekf_state(state):
@@ -177,7 +179,7 @@ def make_proto_esekf_state(state):
     quat = state.ori.as_vec()
 
     rot = Rot.from_quat(quat, scalar_first=True)
-    roll, pitch, yaw = rot.as_euler("XYZ", degrees=True)
+    roll, pitch, yaw = rot.as_euler("xyz", degrees=True)
 
     return UkfState(
         position_x=pos[0],
@@ -232,13 +234,15 @@ if __name__ == "__main__":
     pos[1] = 0.0
 
     heading = wrap_plus_minis_pi(heading)
-    rot = Rot.from_euler("XYZ", [0, 0, heading])
-    q = rot.as_quat(scalar_first=False)
-    # vel = rot.as_matrix() @ vel
+    rot = Rot.from_euler("xyz", [0, 0, heading - 0.08 * 1.8]).inv()
+    q = rot.as_quat()
+    vel = rot.as_matrix() @ vel
     # extended_pose = manif.SE_2_3(np.concatenate([pos, q, vel]))
     g = np.array([0.0, 0.0, -9.822])
     gyro_bias = np.array([0.0, 0.0, 0.00])
-    q = RotationQuaterion.from_vec(q)
+    print(q)
+    q = RotationQuaterion(q[-1], q[0:3])
+    print(q)
     x0 = esekf.NominalState(ori=q, pos=pos, vel=vel, gyro_bias=np.array(
         [0., 0., 0.]), acc_bias=np.array([0., 0., 0.]))
     print(x0)
@@ -251,12 +255,12 @@ if __name__ == "__main__":
     P0[12:15, 12:15] = 1e-4 * np.eye(3)
 
     model = ImuModel(
-        gyro_std=8e-2,
-        gyro_bias_std=4e-9,
-        gyro_bias_p=0.001,
+        gyro_std=8e-6,
+        gyro_bias_std=4e-4,
+        gyro_bias_p=0.000001,
         accel_std=10,
         accel_bias_std=0.0001,
-        accel_bias_p=0.0001,
+        accel_bias_p=0.00000001,
     )
 
     dim_x = x0.dof()  # State dimension
@@ -269,5 +273,6 @@ if __name__ == "__main__":
 
     ukf = esekf.ESEFK(x0=x0, P0=P0, model=model)
 
+    
     run_esekf(ukf, reader)
 

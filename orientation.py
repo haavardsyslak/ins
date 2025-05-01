@@ -31,17 +31,18 @@ class RotationQuaterion(Orientation):
         if not np.allclose(norm, 1):
             self.eta /= norm
             self.epsilon /= norm
-        if self.eta < 0:
-            self.eta *= -1
-            self.epsilon *= -1
+        # if self.eta < 0:
+        #     self.eta *= -1
+        #     self.epsilon *= -1
 
     @property
     def R(self):
         """As rotation matrix"""
-        S = skew(self.epsilon)
-        R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
+        # S = skew(self.epsilon)
+        # R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
+        return Rot.from_quat(self._as_scipy_quat()).as_matrix()
 
-        return R
+        # return R
 
     def multiply(self, other):
         eta_a = self.eta
@@ -105,6 +106,9 @@ class RotationQuaterion(Orientation):
 
     def __matmul__(self, other):
         return self.multiply(other)
+
+    def _as_scipy_quat(self):
+        return np.append(self.epsilon, self.eta)
 
 
 class AttitudeError:

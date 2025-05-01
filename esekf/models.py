@@ -56,15 +56,17 @@ class ImuModel:
         predicted position and velicity
         """
         omega = u[:3] - state.gyro_bias
-        a_m = (-u[3:6] * 9.78) - state.acc_bias
+        a_m = (u[3:6] * 9.78) - state.acc_bias
+        # a_m[:2] *= -1
         Rq = state.ori.R
-        acc = a_m + Rq.T @ self.g
+        acc = a_m - Rq.T @ self.g
+        # print(acc)
 
         theta = omega * dt
         d_vel = acc * dt
 
         pos_pred = state.pos + Rq @ (dt * state.vel)  # + 0.5 * dt**2 * acc
-        vel_pred = state.vel + d_vel * dt
+        vel_pred = state.vel + d_vel
 
         delta_rot = AttitudeError.from_rodrigues_param(theta)
         ori_pred = state.ori.multiply(delta_rot)
@@ -221,31 +223,44 @@ class DvlMeasurement(Measurement):
         # # Initialize the Jacobian matrices
         #
         # # fmt: off
-        # H_q = np.array([
-        #     [-2*e2*v_z + 2*e3*v_y, 2*e2*v_y + 2*e3*v_z, 2*e1*v_y - 4*e2*v_x - 2*n*v_z, 2*e1*v_z - 4*e3*v_x + 2*n*v_y],
-        #     [2*e1*v_z - 2*e3*v_x, -4*e1*v_y + 2*e2*v_x + 2*n*v_z, 2*e1*v_x + 2*e3*v_z, 2*e2*v_z - 4*e3*v_y - 2*n*v_x],
-        #     [-2*e1*v_y + 2*e2*v_x, -4*e1*v_z + 2*e3*v_x - 2*n*v_y, -4*e2*v_z + 2*e3*v_y + 2*n*v_x, 2*e1*v_x + 2*e2*v_y]
-        #         ])
-        #
-        #
-        # H_v = np.array([
-        #     [-2*e2**2 - 2*e3**2 + 1, 2*e1*e2 + 2*e3*n, 2*e1*e3 - 2*e2*n],
-        #     [2*e1*e2 - 2*e3*n, -2*e1**2 - 2*e3**2 + 1, 2*e1*n + 2*e2*e3], 
-        #     [2*e1*e3 + 2*e2*n, -2*e1*n + 2*e2*e3, -2*e1**2 - 2*e2**2 + 1]
-        #         ])
+        v_x, v_y, v_z = state.vel
+        n, e1, e2, e3 = state.ori.as_vec()
+        H_q = np.array([
+            [-2*e2*v_z + 2*e3*v_y, 2*e2*v_y + 2*e3*v_z, 2*e1*v_y - 4*e2*v_x - 2*n*v_z, 2*e1*v_z - 4*e3*v_x + 2*n*v_y],
+            [2*e1*v_z - 2*e3*v_x, -4*e1*v_y + 2*e2*v_x + 2*n*v_z, 2*e1*v_x + 2*e3*v_z, 2*e2*v_z - 4*e3*v_y - 2*n*v_x],
+            [-2*e1*v_y + 2*e2*v_x, -4*e1*v_z + 2*e3*v_x - 2*n*v_y, -4*e2*v_z + 2*e3*v_y + 2*n*v_x, 2*e1*v_x + 2*e2*v_y]
+                ])
+        # #
+        # #
+        H_v = np.array([
+            [-2*e2**2 - 2*e3**2 + 1, 2*e1*e2 + 2*e3*n, 2*e1*e3 - 2*e2*n],
+            [2*e1*e2 - 2*e3*n, -2*e1**2 - 2*e3**2 + 1, 2*e1*n + 2*e2*e3], 
+            [2*e1*e3 + 2*e2*n, -2*e1*n + 2*e2*e3, -2*e1**2 - 2*e2**2 + 1]
+                ])
+        # H_v = state.ori.R.T
+        q0, q1, q2, q3 = state.ori.as_vec()
+
+    # ∂h/∂q (3x4)
+        # H_q = 2 * np.array([
+        #     [-q1*vx - q2*vy - q3*vz,  q0*vx + q2*vz - q3*vy,  q0*vy - q1*vz + q3*vx,  q0*vz + q1*vy - q2*vx],
+        #     [-q2*vz + q3*vy + q1*vx,  q2*vx - q0*vz - q3*vy,  q3*vx + q0*vy - q1*vz, -q2*vy + q1*vx + q0*vz],
+        #     [-q3*vx + q1*vz - q2*vy,  q3*vx + q0*vy - q1*vz,  q1*vx + q3*vz - q0*vy,  q2*vx + q0*vz - q3*vy]
+        #     ])
         # # fmt: on
         #
         # # Assemble the final Jacobian H_x
-        # H_x = np.zeros((3, 18))  # 6x6 matrix for H_x
+        H = np.zeros((3, 16))  # 6x6 matrix for H_x
+        # H[:, 3:6] = H_v        # velocity
+        # H[:, 6:10] = H_q       # quaternion
         # H_x[0:4, :] = H_q
         # H_x[8:10, :] = H_v
         #
-        R = state.ori.R  # Rotation matrix from world to body
-        v = state.vel   # Velocity in world frame
+        # R = state.ori.R  # Rotation matrix from world to body
+        # v = state.vel   # Velocity in world frame
 
         # Skew-symmetric matrix of velocity
 
-        H = np.zeros((3, 16))  # 3 outputs (body frame velocities) vs 15 error states
+        # H = np.zeros((3, 16))  # 3 outputs (body frame velocities) vs 15 error states
 
         # Partial derivative wrt orientation error (delta theta)
         H[:, 3:6] = np.eye(3)
@@ -254,6 +269,7 @@ class DvlMeasurement(Measurement):
 
     def h(self, state: NominalState):
         # R = state.ori.R
+        # return R.T @ state.vel
         return state.vel
 
 
@@ -277,7 +293,7 @@ class DepthMeasurement(Measurement):
 
     def H(self, state: NominalState) -> np.ndarray:
         H = np.zeros((1, 16))
-        H[0, 0] = 1  # Only sensitive to z-position error
+        H[0, 2] = 1  # Only sensitive to z-position error
         return H
 
 
