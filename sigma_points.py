@@ -100,7 +100,7 @@ class SigmaPoints:
 
 
 class SimplexSigmaPoints(object):
-    def __init__(self, n, alpha=1):
+    def __init__(self, n, alpha=1.0):
         self.n = n
         self.alpha = alpha
         self.num_sigmas = self.n + 1

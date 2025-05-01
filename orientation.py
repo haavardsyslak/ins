@@ -31,17 +31,18 @@ class RotationQuaterion(Orientation):
         if not np.allclose(norm, 1):
             self.eta /= norm
             self.epsilon /= norm
-        if self.eta < 0:
-            self.eta *= -1
-            self.epsilon *= -1
+        # if self.eta < 0:
+        #     self.eta *= -1
+        #     self.epsilon *= -1
 
     @property
     def R(self):
         """As rotation matrix"""
-        S = skew(self.epsilon)
-        R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
+        # S = skew(self.epsilon)
+        # R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
+        return Rot.from_quat(self._as_scipy_quat()).as_matrix()
 
-        return R
+        # return R
 
     def multiply(self, other):
         eta_a = self.eta
@@ -106,6 +107,9 @@ class RotationQuaterion(Orientation):
     def __matmul__(self, other):
         return self.multiply(other)
 
+    def _as_scipy_quat(self):
+        return np.append(self.epsilon, self.eta)
+
 
 class AttitudeError:
     """Translates error quaterion into minmal error represntation and vice versa"""
@@ -120,12 +124,14 @@ class AttitudeError:
         return 2 * (quaterion[1:] / quaterion[0])
 
     @staticmethod
-    def from_rodrigues_param(arr: np.ndarray):
+    def from_rodrigues_param(arr: np.ndarray) -> RotationQuaterion:
         if len(arr) != 3:
             raise ValueError("Rodrigues parameter must be of length 3")
+        rot = Rot.from_rotvec(arr)
+        quat = rot.as_quat(scalar_first=True)  # Returns [x, y, z, w] (SciPy convention!)
 
-        norm_sq = np.linalg.norm(arr) ** 2
-        return (np.sqrt(4 + norm_sq)) * np.hstack((2, arr))
+    # SciPy returns (x, y, z, w) — we want (w, x, y, z) probably
+        return RotationQuaterion(eta=quat[0], epsilon=quat[1:])
 
 
 def quaternion_weighted_average(quats, weights):
