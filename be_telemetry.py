@@ -4,15 +4,16 @@ from foxglove import FoxgloveLogger
 import blueye
 from blueye.sdk import Drone
 import blueye.protocol as bp
+from datetime import datetime
 
 
 class DroneTelemetry:
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, stream=True):
         self.filename = filename
         self.drone = None
         self.telemetry_messages = []
         self._start_bridge()
-        self.foxglove_logger = FoxgloveLogger(self.filename)
+        self.foxglove_logger = FoxgloveLogger(self.filename, stream=stream)
 
         # Setup the drone (but do not add callbacks yet)
         self._setup_drone()
@@ -45,7 +46,7 @@ class DroneTelemetry:
         msgs.append(bp.CalibratedImuTel)
         self.drone.telemetry.set_msg_publish_frequency(bp.Imu1Tel, 100)
         msgs.append(bp.Imu1Tel)
-        self.drone.telemetry.set_msg_publish_frequency(bp.Imu2Tel, 100)
+        self.drone.telemetry.set_msg_publish_frequency(bp.Imu2Tel, 50)
         msgs.append(bp.Imu2Tel)
         self.drone.telemetry.set_msg_publish_frequency(bp.DepthTel, 10)
         msgs.append(bp.DepthTel)
@@ -69,7 +70,10 @@ class DroneTelemetry:
 
 # Example usage
 if __name__ == "__main__":
-    telem = DroneTelemetry("asdf.mcap")
+    filename = "gnss_challenging_env"
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    filename = f"{filename}_{current_time}.mcap"
+    telem = DroneTelemetry(filename)
 
     while True:
         inn = input("Stop? [y/N]")
