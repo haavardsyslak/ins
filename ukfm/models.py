@@ -37,15 +37,16 @@ class ImuModel:
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3] - state.gyro_bias
-        a_m = (u[3:6] * 9.78) - state.acc_bias + w[3:6]
+        # print(u[:3])
+        a_m = (u[3:6] * 9.80665) + w[3:6] - state.acc_bias
         # print(a_m)
         R = state.extended_pose.rotation()
         Rt = state.extended_pose.rotation().T
-        acc = a_m - Rt @ state.g
+        acc = a_m + Rt @ state.g
 
         theta = omega * dt
         d_vel = acc * dt
-        d_pos = Rt @ state.extended_pose.linearVelocity() * dt  # + .5 * R @ acc * dt**2
+        d_pos = Rt @ state.extended_pose.linearVelocity() * dt #+ .5 * acc * dt**2
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
 
@@ -57,20 +58,21 @@ class ImuModel:
         acc_bias = np.exp(-dt * self.accel_bias_p) * state.acc_bias + w[9:12]
         # acc_bias = np.zeros(3)
         # gyro_bias[1] = 0
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
+                        initial_global_pos=state.initial_global_pos)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
 
     @classmethod
     def phi_up(cls, state, xi):
+        # return cls.phi(state, xi)
         tangent = manif.SE_2_3Tangent(xi[:9])
-        new_extended_pose = tangent + state.extended_pose # + tangent
+        new_extended_pose = tangent + state.extended_pose  # + tangent
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
-        print(acc_bias)
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
-
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
+                        initial_global_pos=state.initial_global_pos)
 
     @classmethod
     def phi(cls, state, xi):
@@ -81,14 +83,15 @@ class ImuModel:
 
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
+                        initial_global_pos=state.initial_global_pos)
 
     @classmethod
     def phi_inv(cls, state, state_hat):
         """Takes points from the manifold onto the Lie algebra (Log map)"""
         # x_new.lminus(propagated)
-        # tangent = state.extended_pose.lminus(state_hat.extended_pose).coeffs()
-        tangent = state_hat.extended_pose.lminus(state.extended_pose).coeffs()
+        tangent = state.extended_pose.lminus(state_hat.extended_pose).coeffs()
+        # tangent = state_hat.extended_pose.lminus(state.extended_pose).coeffs()
         d_gyro_bias = state.gyro_bias - state_hat.gyro_bias
         d_acc_bias = state.acc_bias - state_hat.acc_bias
 
@@ -116,6 +119,19 @@ class DvlMeasurement(Measurement):
         else:
             self._z = z
 
+        self._nis = None
+        # Vector form the IMU frame to the DVL frame
+        self.lever_arm = np.array([-17e-2, 0, 26e-2])
+        self._lever_arm_comp = np.zeros(3)
+
+    @property
+    def lever_arm_comp(self):
+        return self._lever_arm_comp
+
+    @lever_arm_comp.setter
+    def lever_arm_comp(self, value):
+        self._lever_arm_comp = value
+
     @property
     def z(self):
         return self._z
@@ -124,11 +140,18 @@ class DvlMeasurement(Measurement):
     def z(self, val: np.ndarray):
         self._z = val
 
-    def h(self, state: LieState) -> np.ndarray:
+    def h(self, state: LieState, omega=np.zeros(3)) -> np.ndarray:
         R = state.extended_pose.rotation()
-        return R.T @ state.extended_pose.linearVelocity()
         # return state.extended_pose.linearVelocity()
-        # return R.T @ state.extended_pose.linearVelocity()
+        return R.T @ state.extended_pose.linearVelocity() - self.lever_arm_comp
+
+    @property
+    def nis(self):
+        return self._nis
+
+    @nis.setter
+    def nis(self, nis):
+        self._nis = nis
 
 
 class Magnetometer(Measurement):
@@ -161,6 +184,7 @@ class DepthMeasurement(Measurement):
         self.dim = 1
         if z is not None:
             self._z = z
+        self._nis = None
 
     @property
     def z(self) -> float:
@@ -171,8 +195,15 @@ class DepthMeasurement(Measurement):
         self._z = val
 
     def h(self, state: LieState) -> float:
-        R = state.extended_pose.rotation()
         return state.extended_pose.translation()[-1]
+
+    @property
+    def nis(self):
+        return self._nis
+
+    @nis.setter
+    def nis(self, nis):
+        self._nis = nis
 
 
 class GnssMeasurement(Measurement):
@@ -182,6 +213,9 @@ class GnssMeasurement(Measurement):
         self.dim = 2
         if z is not None:
             self._z = z
+        self._nis = None
+
+        self.lever_arm = np.array([-35e-2, 0, -5e-2])
 
     @property
     def z(self) -> np.ndarray:
@@ -193,5 +227,13 @@ class GnssMeasurement(Measurement):
 
     def h(self, state: LieState):
         return state.extended_pose.translation()[:2]
+
+    @property
+    def nis(self):
+        return self._nis
+
+    @nis.setter
+    def nis(self, nis):
+        self._nis = nis
 
 

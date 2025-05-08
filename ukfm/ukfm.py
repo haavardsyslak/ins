@@ -112,30 +112,15 @@ class UKFM:
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
-        # self.x = self.model.phi_up(self.x, xi_plus)
-        self.x = self.phi(self.x, xi_plus)
+        self.x = self.model.phi_up(self.x, xi_plus)
+        # self.x = self.phi(self.x, xi_plus)
 
         self.P -= K @ S @ K.T
 
         # Avoid non sysmetric matrices
         self.P = (self.P + self.P.T) / 2
 
-
-def make_ukf(x0: LieState, P0: np.ndarray, model):
-    # Define the parameters for the UKF
-
-    dim_x = x0.dof()  # State dimension
-    dim_q = 6  # Process noise dimension
-    points = SigmaPoints(dim_x, alpha=1e-3, beta=2, kappa=3 - dim_x)
-    noise_points = SigmaPoints(dim_q, alpha=8e-3, beta=2, kappa=3 - dim_q)
-    model = ImuModel(
-        gyro_std=1e-4,
-        gyro_bias_std=0.00001,
-        gyro_bias_p=0.0001,
-        accel_std=10,
-        accel_bias_std=0.000001,
-        accel_bias_p=0.0001,
-    )
-    # Create an instance of the UKFM class
-    ukf = UKFM(dim_x, dim_q, points, noise_points, model, x0, P0)
-    return ukf
+    def nees_pos(self, true_pos):
+        x_hat = self.x.extended_pose.translation()
+        x = true_pos
+        return (x_hat - x).T @ self.P[:3,:3] @ (x_hat - x)

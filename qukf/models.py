@@ -69,7 +69,7 @@ class ImuModelLie:
         acc = (-u[3:6] * 9.81) + w[3:6]
         R = state.R @ SO3.exp(omega * dt)
         self.g = np.array([0, 0, state.g])
-        p = state.pos + state.vel * dt + 0.5 * ((state.R @ acc) + self.g) * dt**2
+        p = state.pos + state.vel * dt #+ 0.5 * ((state.R @ acc) + self.g) * dt**2
         v = state.vel + ((state.R @ acc) + self.g) * dt
         return LieState(R=R, vel=v, pos=p, g=state.g)
 
@@ -134,9 +134,11 @@ class DvlMeasurement(Measurement):
         else:
             self._z = z
 
+
     @property
     def z(self):
         return self._z
+
 
     @z.setter
     def z(self, val: np.ndarray):

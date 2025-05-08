@@ -45,7 +45,7 @@ class DroneTelemetry:
         msgs.append(bp.CalibratedImuTel)
         self.drone.telemetry.set_msg_publish_frequency(bp.Imu1Tel, 100)
         msgs.append(bp.Imu1Tel)
-        self.drone.telemetry.set_msg_publish_frequency(bp.Imu2Tel, 100)
+        self.drone.telemetry.set_msg_publish_frequency(bp.Imu2Tel, 50)
         msgs.append(bp.Imu2Tel)
         self.drone.telemetry.set_msg_publish_frequency(bp.DepthTel, 10)
         msgs.append(bp.DepthTel)
@@ -69,7 +69,7 @@ class DroneTelemetry:
 
 # Example usage
 if __name__ == "__main__":
-    telem = DroneTelemetry("asdf.mcap")
+    telem = DroneTelemetry("mau_asdf.mcap")
 
     while True:
         inn = input("Stop? [y/N]")
