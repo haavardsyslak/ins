@@ -2,6 +2,8 @@ import numpy as np
 from sigma_points import SigmaPoints
 from .models import ImuModel, DvlMeasurement, Magnetometer
 from .state import LieState
+from scipy.spatial.transform import Rotation as Rot
+from messages_pb2 import UkfState
 
 
 class UKFM:
@@ -123,4 +125,33 @@ class UKFM:
     def nees_pos(self, true_pos):
         x_hat = self.x.extended_pose.translation()
         x = true_pos
-        return (x_hat - x).T @ self.P[:3,:3] @ (x_hat - x)
+        return (x_hat - x).T @ self.P[:3, :3] @ (x_hat - x)
+
+    def to_proto_msg(self):
+        extended_pose = self.x.extended_pose
+        g = self.x.g[-1]
+        quat = extended_pose.coeffs()[3:7]
+
+        rot = Rot.from_matrix(extended_pose.rotation())
+        roll, pitch, yaw = rot.as_euler("xyz", degrees=True)
+
+        return UkfState(
+            position_x=extended_pose.x(),
+            position_y=extended_pose.y(),
+            position_z=extended_pose.z(),
+            quaternion_w=quat[0],
+            quaternion_x=quat[1],
+            quaternion_y=quat[2],
+            quaternion_z=quat[3],
+            velocity_x=extended_pose.vx(),
+            velocity_y=extended_pose.vy(),
+            velocity_z=extended_pose.vz(),
+            heading=yaw,
+            g=g,
+            roll=roll,
+            pitch=pitch,
+            gyro_bias_x=self.x.gyro_bias[0],
+            gyro_bias_y=self.x.gyro_bias[1],
+            gyro_bias_z=self.x.gyro_bias[2],
+        )
+
