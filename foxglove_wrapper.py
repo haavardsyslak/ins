@@ -27,7 +27,6 @@ class McapProtobufReader:
         except StopIteration:
             return None
 
-
     def __iter__(self):
         return self.msg_iter
 
