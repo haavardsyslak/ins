@@ -1,6 +1,6 @@
 import numpy as np
 from sigma_points import SigmaPoints
-from .models import ImuModel, DvlMeasurement, Magnetometer
+from .models import ImuModel
 from .state import LieState
 from scipy.spatial.transform import Rotation as Rot
 from messages_pb2 import UkfState
@@ -23,7 +23,6 @@ class UKFM:
         self.noise_points = noise_points
         self.dim_q = dim_q
         self.dim_x = dim_x
-        # self.dim_z
         self.x = x0
         self.P = P0
         self.model = model
@@ -31,6 +30,10 @@ class UKFM:
         self.phi_inv = self.model.phi_inv
         self.Q = Q
         self.R = R
+        # Holds the latest innvoation
+        self.innovation = None
+        # Holds the lates innovation covariance
+        self.S_inv = None
 
     def propagate(self, u, dt):
         # Q = self.model.Q_c
@@ -108,9 +111,9 @@ class UKFM:
 
         S = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(dz, dz) + R
         Pxz = self.points.Wc_i * np.hstack([xis[:self.dim_x].T, xis[self.dim_x:].T]).dot(new_xis)
-        S_inv = np.linalg.inv(S)
+        self.S_inv = np.linalg.inv(S)
 
-        K = Pxz @ S_inv
+        K = Pxz @ self.S_inv
         # K = np.linalg.solve(S, Pxz.T).T
         innov = z - z_pred_bar
         xi_plus = K @ innov
@@ -127,11 +130,16 @@ class UKFM:
         x = true_pos
         return (x_hat - x).T @ self.P[:3, :3] @ (x_hat - x)
 
+    def nis(self):
+        # Compute the NIS
+        return self.innovation.T @ self.S_inv @ self.innovation
+
     def to_proto_msg(self):
         extended_pose = self.x.extended_pose
         g = self.x.g[-1]
         quat = extended_pose.coeffs()[3:7]
 
+        vel = extended_pose.rotation().T @ extended_pose.linearVelocity()
         rot = Rot.from_matrix(extended_pose.rotation())
         roll, pitch, yaw = rot.as_euler("xyz", degrees=True)
 
@@ -143,9 +151,9 @@ class UKFM:
             quaternion_x=quat[1],
             quaternion_y=quat[2],
             quaternion_z=quat[3],
-            velocity_x=extended_pose.vx(),
-            velocity_y=extended_pose.vy(),
-            velocity_z=extended_pose.vz(),
+            velocity_x=vel[0],
+            velocity_y=vel[1],
+            velocity_z=vel[2],
             heading=yaw,
             g=g,
             roll=roll,
@@ -153,5 +161,8 @@ class UKFM:
             gyro_bias_x=self.x.gyro_bias[0],
             gyro_bias_y=self.x.gyro_bias[1],
             gyro_bias_z=self.x.gyro_bias[2],
+            accel_bias_x=self.x.acc_bias[0],
+            accel_bias_y=self.x.acc_bias[1],
+            accel_bias_z=self.x.acc_bias[2],
         )
 
