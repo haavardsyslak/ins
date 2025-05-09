@@ -4,10 +4,12 @@ from dataclasses import dataclass, field
 import pymap3d as pm
 from datetime import datetime
 from pygeomag import geomag
+from istate import IState
+from scipy.spatial.transform import Rotation as Rot
 
 
 @dataclass
-class LieState:
+class LieState(IState):
     extended_pose: manif.SE_2_3
     gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
     acc_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
@@ -17,8 +19,41 @@ class LieState:
     #      0.0,
     #      0.0]))
     #
+
     def dof(self):
         return 9 + len(self.gyro_bias) + len(self.acc_bias)
+
+    @property
+    def position(self) -> np.ndarray:
+        return self.extended_pose.translation()
+
+    @property
+    def velocity(self) -> np.ndarray:
+        return self.extended_pose.linearVelocity()
+
+    @property
+    def R(self) -> np.ndarray:
+        return self.extended_pose.rotation()
+
+    @property
+    def q(self) -> np.ndarray:
+        # print(self.extended_pose.coeffs()[3:7])
+        # input()
+        return Rot.from_matrix(self.R).as_quat()
+        # return self.extended_pose.coeffs()[3:7]
+
+    @property
+    def euler(self) -> np.ndarray:
+        return Rot.from_matrix(self.R).as_euler("xyz", degress=True)
+
+    @property
+    def gyroscope_bias(self) -> np.ndarray:
+        return self.gyro_bias
+
+    @property
+    def accelerometer_bias(self) -> np.ndarray:
+        return self.acc_bias
+
     #
     # def to_global_position(self):
     #     lat0 = self.initial_global_pos[0]
@@ -70,13 +105,12 @@ class LieState:
     #
     #     return b_n
 
-
     def nis(self):
         pass
 
     def nees(self):
         pass
 
-        
+
 
 
