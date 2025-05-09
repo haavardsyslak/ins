@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation as Rot
 import manifpy as manif
 from google.protobuf.timestamp_pb2 import Timestamp
 from foxglove_schemas_protobuf.LocationFix_pb2 import LocationFix
-from foxglove import FoxgloveLogger
+from foxglove_wrapper import FoxgloveLogger
 import time
 import pymap3d as pm
 from utils import wrap_plus_minis_pi
