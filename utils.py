@@ -1,4 +1,5 @@
 import numpy as np
+from google.protobuf.timestamp_pb2 import Timestamp
 
 
 def skew(v: np.ndarray) -> np.ndarray:
@@ -19,3 +20,11 @@ def vee(Phi) -> np.ndarray:
 def wrap_plus_minis_pi(heading):
     """Wraps the angle to the range [-pi, pi]"""
     return (heading + np.pi) % (2 * np.pi) - np.pi
+
+
+def make_proto_timestamp(log_time_ns):
+    seconds = log_time_ns // 1_000_000_000
+    nanos = log_time_ns % 1_000_000_000
+    return Timestamp(seconds=seconds, nanos=nanos)
+
+
