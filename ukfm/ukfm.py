@@ -115,8 +115,8 @@ class UKFM:
 
         K = Pxz @ self.S_inv
         # K = np.linalg.solve(S, Pxz.T).T
-        innov = z - z_pred_bar
-        xi_plus = K @ innov
+        self.innovation = z - z_pred_bar
+        xi_plus = K @ self.innovation
         self.x = self.model.phi_up(self.x, xi_plus)
         # self.x = self.phi(self.x, xi_plus)
 
@@ -126,9 +126,10 @@ class UKFM:
         self.P = (self.P + self.P.T) / 2
 
     def nees_pos(self, true_pos):
-        x_hat = self.x.extended_pose.translation()
-        x = true_pos
-        return (x_hat - x).T @ self.P[:3, :3] @ (x_hat - x)
+        idx = 2
+        x_hat = self.x.extended_pose.translation()[:idx]
+        x = true_pos[:idx]
+        return (x_hat - x).T @ np.linalg.inv(self.P[:idx, :idx]) @ (x_hat - x)
 
     def nis(self):
         # Compute the NIS
@@ -164,5 +165,6 @@ class UKFM:
             accel_bias_x=self.x.acc_bias[0],
             accel_bias_y=self.x.acc_bias[1],
             accel_bias_z=self.x.acc_bias[2],
+            covariance=np.diag(self.P)
         )
 
