@@ -16,6 +16,7 @@ from foxglove_schemas_protobuf.FrameTransform_pb2 import FrameTransform
 from foxglove_schemas_protobuf.Vector3_pb2 import Vector3
 from measurement_models import DvlMeasurement, GnssMeasurement, DepthMeasurement
 from google.protobuf.timestamp_pb2 import Timestamp
+from messages_pb2 import NIS, NEES, PositionError
 
 
 @dataclass
@@ -29,7 +30,7 @@ class GlobalPos:
         pos = pm.geodetic2ned(
             self.lat,
             self.lon,
-            self.alt,
+            -self.alt,
             initial_global_pos.lat,
             initial_global_pos.lon,
             initial_global_pos.alt,
@@ -49,6 +50,8 @@ class KFRunner:
         self.initial_global_pos = initial_global_pos
         self.omega = np.zeros(3)
         self.elapsed_time = 0.0
+        self.last_gnss_time = 0.0
+        self.last_depth = 0.0
 
     def handle_message(self, message):
         topic = message.topic
@@ -57,21 +60,28 @@ class KFRunner:
                 dt = self._compute_dt(message.log_time)
                 u = self._parse_imu(message)
                 self.elapsed_time += dt
+                self.last_gnss_time += dt
                 self.omega = u[:3]
                 self.kf.propagate(u, dt)
-                self._publish_pose(message.log_time_ns)
+                self._publish_pose(message.log_time_ns, "ukf.Pose", self.kf.x.position, "rov")
                 self._publish_raw(message)
+                self._publish_state(message.log_time_ns)
 
             case "blueye.protocol.DvlVelocityTel":
                 vel = self._parse_dvl(message)
                 fom = message.proto_msg.dvl_velocity.fom
-                if fom > 1:
-                    fom = 0.02
-                R_dvl = np.eye(3) * fom
+                # R_dvl = np.eye(3) * fom
+                R_dvl = np.diag([0.15**2, 0.15**2, 0.1**2])
+                R_dvl *= (1 + 1 * fom)
+
+                # R_dvl = R_base * (1 + 1 * fom)
                 measurement = DvlMeasurement(R_dvl, vel)
                 self.kf.update(measurement, 0.0)
                 self._publish_state(message.log_time_ns)
                 self._publish_raw(message)
+
+                nis = self.kf.nis()
+                self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
 
             case "blueye.protocol.PositionEstimateTel":
                 message = self._parse_drone_pos_estimate(message)
@@ -82,59 +92,50 @@ class KFRunner:
 
                     if gnss_sensor is not None:
                         gnss_pos = GlobalPos(
-                            gnss_sensor.global_position.latitude, gnss_sensor.global_position.longitude
+                            gnss_sensor.global_position.latitude, gnss_sensor.global_position.longitude, self.last_depth
                         )
+                        ned_pos = gnss_pos.to_ned(self.initial_global_pos)
+                        self._publish_pose(message.log_time_ns, "gnss.Pose", ned_pos, "gnss")
                         self._publish_position(gnss_pos, "gnss.LocationFix", message.log_time_ns)
-                        z = gnss_pos.to_ned(self.initial_global_pos)[:2]
-                        R_gnss = np.diag([gnss_sensor.std, gnss_sensor.std])
-                        measurement = GnssMeasurement(R_gnss, z)
+                        nees = self.kf.nees_pos(ned_pos)
+                        self._publish_nees("NEES pos", nees, message.log_time_ns)
+                        error = self.kf.x.position - ned_pos
+                        z = ned_pos[:2]
                         if self.elapsed_time < 100:
+                            R_gnss = np.diag([2.5**2, 2.5**2])
+                            measurement = GnssMeasurement(R_gnss, z)
+                            self.kf.update(measurement, 0.0)
+                        elif self.last_gnss_time > 1:
+                            self.last_gnss_time = 0
+                            R_gnss = np.diag([500, 500])
+                            measurement = GnssMeasurement(R_gnss, z)
                             self.kf.update(measurement, 0.0)
 
             case "blueye.protocol.DepthTel":
                 self._publish_raw(message)
                 depth = self._parse_depth(message)
-                z = DepthMeasurement(0.05**2, depth)
+                self.last_depth = depth
+                z = DepthMeasurement(0.03**2, depth)
                 self.kf.update(z, 0.0)
+                nis = self.kf.nis()
+                self._publish_nis("Depth.Nis", nis, message.log_time_ns)
+                
+    def _publish_pos_error(self, log_time, error):
+        msg = PositionError(x=error[0], y=error[1], z=0)
+        self.logger.publish("ukf.PosError", msg, log_time)
 
-    def _publish_pose(self, log_time):
+    def _publish_pose(self, log_time, topic, pos, frame):
         q = self.kf.x.q
-        pos = self.kf.x.position
 
         tf = FrameTransform(
             timestamp=utils.make_proto_timestamp(log_time),
             parent_frame_id="ned",
-            child_frame_id="rov",
+            child_frame_id=frame,
             translation=Vector3(x=pos[0], y=pos[1], z=pos[2]),
             rotation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3]),
         )
 
-        self.logger.publish("ukf.Pose", tf, log_time, "foxglove.FrameTransform")
-
-    def _publish_state(self, log_time):
-        msg = self.kf.to_proto_msg()
-        self.logger.publish("blueye.protocol.UKFState", msg, log_time)
-
-        global_pos = self.initial_global_pos.from_ned(self.kf.x.position)
-        self._publish_position(global_pos, "ufk.locatinFix", log_time, cov=self.kf.P)
-
-    def _publish_position(self, pos: GlobalPos, topic: str, log_time, cov=None):
-        location_fix_kwargs = dict(
-            timestamp=utils.make_proto_timestamp(log_time),
-            latitude=pos.lat,
-            longitude=pos.lon,
-            altitude=pos.alt,
-        )
-
-        if cov is not None:
-            location_fix_kwargs.update(
-                position_covariance=cov[:3, :3].flatten().tolist(),
-                position_covariance_type=3,
-            )
-
-        location_fix = LocationFix(**location_fix_kwargs)
-
-        self.logger.publish(topic, location_fix, log_time, "foxglove.LocationFix")
+        self.logger.publish(topic, tf, log_time, "foxglove.FrameTransform")
 
     def _parse_imu(self, message):
         imu = message.proto_msg.imu
@@ -165,6 +166,31 @@ class KFRunner:
     def _parse_depth(self, message):
         return message.proto_msg.depth.value
 
+    def _publish_state(self, log_time):
+        msg = self.kf.to_proto_msg()
+        self.logger.publish("UKFState", msg, log_time)
+
+        global_pos = self.initial_global_pos.from_ned(self.kf.x.position)
+        self._publish_position(global_pos, "ufk.locatinFix", log_time, cov=self.kf.P)
+
+    def _publish_position(self, pos: GlobalPos, topic: str, log_time, cov=None):
+        location_fix_kwargs = dict(
+            timestamp=utils.make_proto_timestamp(log_time),
+            latitude=pos.lat,
+            longitude=pos.lon,
+            altitude=pos.alt,
+        )
+
+        if cov is not None:
+            location_fix_kwargs.update(
+                position_covariance=cov[:3, :3].flatten().tolist(),
+                position_covariance_type=3,
+            )
+
+        location_fix = LocationFix(**location_fix_kwargs)
+
+        self.logger.publish(topic, location_fix, log_time, "foxglove.LocationFix")
+
     def _publish_raw(self, message):
         topic = f"blueye.protocol.{message.proto_msg.__name__}"
         self.logger.publish(topic, message.proto_msg, message.log_time_ns)
@@ -189,6 +215,14 @@ class KFRunner:
 
         self.logger.publish("ned", tf, log_time, "foxglove.FrameTransform")
 
+    def _publish_nis(self, topic, nis, timestamp):
+        msg = NIS(value=nis)
+        self.logger.publish(topic, msg, timestamp)
+
+    def _publish_nees(self, topic, nees, timestamp):
+        msg = NEES(value=nees)
+        self.logger.publish(topic, msg, timestamp)
+
     def run(self, reader: McapProtobufReader):
         msg = reader.get_next_message()
         self._publish_reference_frame(msg.log_time_ns)
@@ -197,3 +231,5 @@ class KFRunner:
             self.handle_message(message)
 
         self.logger.close()
+
+
