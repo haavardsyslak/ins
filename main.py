@@ -68,90 +68,6 @@ def get_initial_state(reader):
             return pos, velocity, heading, global_pos
 
 
-def run_ukf(ukf, reader):
-    logger = FoxgloveLogger("testing.mcap")
-    t = reader.get_next_message().log_time
-    n = 0
-    while True:
-        # time.sleep(0.001)
-        message = reader.get_next_message()
-        if message is None:
-            break
-
-        match message.topic:
-            case "blueye.protocol.Imu2Tel":
-                # messge.log_time
-                gyro = message.proto_msg.imu.gyroscope
-                accel = message.proto_msg.imu.accelerometer
-                mag = message.proto_msg.imu.magnetometer
-                u = np.array([gyro.x, gyro.y, gyro.z, accel.x, accel.y, accel.z])
-                dt = (message.log_time - t).total_seconds()
-                t = message.log_time
-                ukf.propagate(u, dt)
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
-
-            case "blueye.protocol.DvlVelocityTel":
-                vel = message.proto_msg.dvl_velocity.velocity
-                vel = np.array([vel.x, vel.y, vel.z])
-                R_dvl = np.eye(3) * 2e-5
-                # R_dvl[2] = 2e-4
-                # R_dvl[2] = 2.5e-3
-                measurement = DvlMeasurement(R_dvl, vel)
-                ukf.update(measurement, dt)
-                lat, lon, alt = ukf.x.to_global_position(initial_global_position)
-                est_vel = ukf.x.extended_pose.linearVelocity()
-
-                rot = Rot.from_matrix(ukf.x.extended_pose.rotation())
-                location_fix = LocationFix(
-                    timestamp=make_proto_timestamp(message.log_time_ns),
-                    latitude=lat,
-                    longitude=lon,
-                    altitude=alt,
-                    position_covariance=ukf.P[:3, :3].flatten().tolist(),
-                    position_covariance_type=3,
-                )
-                topic = f"ukf.foxglove{location_fix.__name__}"
-                logger.publish(topic, location_fix, message.log_time_ns, "foxglove.LocationFix")
-
-                msg = make_proto_ukf_state(ukf.x)
-                topic = f"custom.{msg.__name__}"
-                logger.publish(topic, msg, message.log_time_ns)
-
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
-
-            case "blueye.protocol.PositionEstimateTel":
-                msg = make_location_fix(message)
-                topic = f"gnss.foxglove.{msg.__name__}"
-                logger.publish(topic, msg, message.log_time_ns, "foxglove.LocationFix")
-                heading = wrap_plus_minis_pi(message.proto_msg.position_estimate.heading)
-                message.proto_msg.position_estimate.heading = np.rad2deg(heading)
-                logger.publish(
-                    f"blueye.protocol.{message.proto_msg.__name__}", message.proto_msg, message.log_time_ns)
-
-                gnss_sensor = get_gnss_sensor(message.proto_msg)
-                if not gnss_sensor.is_valid:
-                    continue
-
-                lat = gnss_sensor.global_position.latitude
-                long = gnss_sensor.global_position.longitude
-                z = ukf.x.from_global_position(lat, long)
-                std = gnss_sensor.std
-                R_gnss = np.diag([std, std])
-                measurement = GnssMeasurement(R_gnss, z)
-                # ukf.update(measurement, dt)
-
-            case "blueye.protocol.DepthTel":
-                R_depth = 0.05**2
-                depth_meas = DepthMeasurement(R_depth)
-                depth_meas.z = message.proto_msg.depth.value
-                ukf.update(depth_meas, dt)
-                topic = f"blueye.protocol.{message.proto_msg.__name__}"
-                logger.publish(topic, message.proto_msg, message.log_time_ns)
-
-    input("Enter to close logger")
-    logger.close()
 
 
 def make_proto_ukf_state(state):
@@ -197,7 +113,7 @@ def make_location_fix(message: bp.PositionEstimateTel):
 
 
 if __name__ == "__main__":
-    np.set_printoptions(precision=2, linewidth=999)
+    np.set_printoptions(precision=4, linewidth=999)
     global initial_global_pos
     # Create an instance of the reader
     reader = McapProtobufReader("adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap")
@@ -213,7 +129,7 @@ if __name__ == "__main__":
     pos[0] = 0.0
     pos[1] = 0.0
 
-    heading = np.deg2rad(-110)
+    # heading = np.deg2rad(-110)
     heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("xyz", [0, 0, heading])
     q_scipy = rot.as_quat()
@@ -222,37 +138,38 @@ if __name__ == "__main__":
     extended_pose = manif.SE_2_3(np.concatenate([pos, q_scipy, vel]))
     print(Rot.from_quat(q, scalar_first=True).as_euler("xyz", degrees=True))
     g = np.array([0.0, 0.0, -9.822])
-    gyro_bias = np.array([0.0, 0.0, 0.0])
-    accel_bias = np.array([0.0, 0.0, 0.0])
+    gyro_bias = np.array([0.0, 0.0, 0.004])
+    accel_bias = np.array([0.0004, 0.001, -0.004])
     x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, acc_bias=accel_bias)
     P0 = np.eye(x0.dof())
-    P0[0:3, 0:3] = 2.5 * np.eye(3)
-    P0[3:6, 3:6] = 1e-6 * np.eye(3)
-    P0[6:9, 6:9] = 1e-3 * np.eye(3)
-    P0[9:12, 9:12] = 1e-1 * np.eye(3)
-    P0[12:15, 12:15] = 1e-1 * np.eye(3)
+    P0[0:3, 0:3] = 5 * np.eye(3)
+    P0[2, 2] = 0.2**2
+    P0[3:6, 3:6] = 1e-2* np.eye(3)
+    P0[6:9, 6:9] = 0.15**2 * np.eye(3)
+    P0[9:12, 9:12] = 1e-6 * np.eye(3)
+    P0[12:15, 12:15] = 1e-6 * np.eye(3)
 
     model = ImuModel(
-        gyro_std=8.73e-2,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
-        gyro_bias_std=9.7e-3,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
-        gyro_bias_p=0.00001,         # Gauss-Markov decay rate (correlation time ~1000 s)
-        accel_std=5.88e-1,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²
-        accel_bias_std=3.5e-2,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
+        gyro_std=8.73e-4,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
+        gyro_bias_std=9.7e-2,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
+        gyro_bias_p=0.0001,         # Gauss-Markov decay rate (correlation time ~1000 s)
+        accel_std=5.88e-5,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²
+        accel_bias_std=3.5e-3,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
         # Gauss-Markov decay rate (correlation time ~1000 s)       # accel_bias_p=0.0000001,
-        accel_bias_p=0.00001,
+        accel_bias_p=0.0001,
     )
 
     dim_x = x0.dof()  # State dimension
     dim_q = model.Q.shape[0]  # Process noise dimension
 
-    points = SigmaPoints(dim_x, alpha=5e-2, beta=2, kappa=3 - dim_x)
-    noise_points = SigmaPoints(dim_q, alpha=5e-5, beta=2, kappa=3 - dim_q)
+    points = SigmaPoints(dim_x, alpha=8e-1, beta=2, kappa=3-dim_x)
+    noise_points = SigmaPoints(dim_q, alpha=5e-5, beta=2, kappa=3-dim_q)
     # points = SigmaPoints(dim_x, alpha=1e-2, beta=2, kappa=3-dim_x)
     # noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3-dim_q)
 
     ukf = ukfm.UKFM(dim_x, dim_q, points, noise_points, model, x0, P0)
 
-    logger = FoxgloveLogger("01testing.mcap", stream=True)
+    logger = FoxgloveLogger("01testing.mcap", stream=False)
     runner = KFRunner(ukf, logger, initial_global_position)
     runner.run(reader)
 
