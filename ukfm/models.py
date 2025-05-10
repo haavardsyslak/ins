@@ -31,9 +31,9 @@ class ImuModel:
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
-        omega = u[:3] + w[:3] - state.gyro_bias
+        omega = u[:3]  - state.gyro_bias + w[:3]
         # print(u[:3])
-        a_m = (u[3:6] * 9.80665) + w[3:6] - state.acc_bias
+        a_m = (u[3:6] * 9.80665) - state.acc_bias + w[3:6]
         # print(a_m)
         R = state.extended_pose.rotation()
         Rt = state.extended_pose.rotation().T
