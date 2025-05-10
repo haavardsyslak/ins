@@ -46,11 +46,19 @@ message UkfState {
   // Covariance matrix as a flattened row-major vector.
   // The dimension should match the state dimension (e.g., 15x15 -> 225 values)
   repeated double covariance = 23;
+}
 
-  // Normalized Estimation Error Squared (for position)
-  double nees_position = 24;
+message NIS { double value = 1; }
 
-  // Normalized Innovation Squared (for velocity and depth)
-  double nis_depth = 25;
-  double nis_velocity = 26;
+message NEES { double value = 1; }
+
+message PositionError {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+message VelocityError {
+  double velocity_x = 1;
+  double velocity_y = 2;
+  double velocity_z = 3;
 }
