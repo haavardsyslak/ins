@@ -40,13 +40,17 @@ message UkfState {
   double gyro_bias_x = 17;
   double gyro_bias_y = 18;
   double gyro_bias_z = 19;
-}
+  double accel_bias_x = 20;
+  double accel_bias_y = 21;
+  double accel_bias_z = 22;
+  // Covariance matrix as a flattened row-major vector.
+  // The dimension should match the state dimension (e.g., 15x15 -> 225 values)
+  repeated double covariance = 23;
 
-message ImuData {
-  double gyro_x = 1;
-  double gyro_y = 2;
-  double gyro_z = 3;
-  double accel_x = 4;
-  double accel_y = 5;
-  double accel_z = 6;
+  // Normalized Estimation Error Squared (for position)
+  double nees_position = 24;
+
+  // Normalized Innovation Squared (for velocity and depth)
+  double nis_depth = 25;
+  double nis_velocity = 26;
 }

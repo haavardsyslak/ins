@@ -2,6 +2,7 @@ from mcap_protobuf.writer import Writer
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import descriptor_pb2
 from foxglove_schemas_protobuf import LocationFix_pb2
+from mcap_protobuf.reader import read_protobuf_messages
 import inspect
 import sys
 import time
@@ -13,42 +14,21 @@ import threading
 import asyncio
 import base64
 
-# Initialize MCAP file
-with open("location.mcap", "wb") as f:
-    writer = Writer(f)
-    # proto_writer = Writer(writer)
+class McapProtobufReader:
+    def __init__(self, filename):
+        self.filename = filename
+        self.msg_iter = read_protobuf_messages(filename)
 
-    # Register schema
-    schema_name = "foxglove.LocationFix"
-    # writer.register_message_type(LocationFix_pb2.LocationFix, schema_name=schema_name)
+    def get_next_message(self):
+        # Use self.msg_iter to get the next message
+        try:
+            message = next(self.msg_iter)
+            return message
+        except StopIteration:
+            return None
 
-    # Create LocationFix message
-    # timestamp = Timestamp(nanos=int(time.time()*1e9))
-    # create a timestamp
-    now = time.time()
-    secs = int(now)
-    nanos = int((now - secs) * 1e9)
-
-    msg = LocationFix_pb2.LocationFix(
-        timestamp=Timestamp(seconds=secs, nanos=nanos),
-        latitude=63.430515,
-        longitude=10.395053,
-        altitude=0.0,
-    )
-    # Optional fields
-    # msg.horizontal_accuracy_m = 5.0
-    # msg.vertical_accuracy_m = 2.0
-
-    # Write the message to topic
-    writer.write_message(
-        topic="/LocationFix",                 # this is the topic the Map panel expects
-        message=msg,
-        log_time=int(time.time() * 1e9),   # nanoseconds
-        publish_time=int(time.time() * 1e9),
-    )
-
-    writer.finish()
-
+    def __iter__(self):
+        return self.msg_iter
 
 class AsyncFoxgloveServerWrapper:
     def __init__(self, host="0.0.0.0", port=8765, name="Foxglove Python Logger"):
@@ -138,77 +118,6 @@ class FoxgloveLogger:
             "proto_cls": proto_cls,
             "type_name": type_name,
         }
-
-    def register_blueye_descriptors(self):
-        descriptors = {}
-
-        # Get the module corresponding to the namespace
-        module = sys.modules["blueye.protocol"]
-
-        # Iterate through all the attributes of the module
-
-        for name, obj in inspect.getmembers(module):
-            # Check if the object is a class, ends with 'Tel', and has a _meta attribute with pb
-            if (
-                inspect.isclass(obj)
-                and name.endswith("Tel")
-                and hasattr(obj, "_meta")
-                and hasattr(obj._meta, "pb")
-            ):
-                try:
-                    # Access the DESCRIPTOR
-                    descriptor = obj._meta.pb.DESCRIPTOR
-
-                    # Create a FileDescriptorSet
-                    file_descriptor_set = descriptor_pb2.FileDescriptorSet()
-
-                    # Add the descriptor and its dependencies
-                    add_file_descriptor_and_dependencies(descriptor.file, file_descriptor_set)
-
-                    # Serialize the FileDescriptorSet to binary
-                    serialized_data = file_descriptor_set.SerializeToString()
-
-                    # Base64 encode the serialized data
-                    # schema_base64 = base64.b64encode(serialized_data).decode("utf-8")
-
-                    # Store the serialized data in the dictionary
-                    descriptors[name] = serialized_data
-                except AttributeError as e:
-                    print(f"Skipping message: {name}: {e}")
-                    # Skip non-message types
-                    raise e
-
-    # Register channels and schemas after collecting them
-        for message_name, descriptor in descriptors.items():
-            topic = f"blueye.protocol.{message_name}"
-            schema_name = topic
-
-            channel = {
-                "topic": topic,
-                "encoding": "protobuf",
-                "schemaName": schema_name,
-                "schema": base64.b64encode(descriptor).decode("utf-8"),
-            }
-            chan_id = self.server.add_channel(channel)
-            # Store the chan_id in the map
-            self.server_channels[topic] = chan_id
-
-            # Register the schema with the writer
-            schema_id = self.writer._writer.register_schema(
-                name=schema_name,
-                encoding="protobuf",
-                data=descriptor,
-            )
-
-            self.schemas[topic] = schema_id
-
-            chan_id = self.writer._writer.register_channel(
-                schema_id=schema_id,
-                topic=topic,
-                message_encoding="protobuf",
-            )
-            self.topics.append(topic)
-            self.mcap_channels[topic] = chan_id
 
     def get_protobuf_descriptor(self, message):
         file_descriptor_set = descriptor_pb2.FileDescriptorSet()

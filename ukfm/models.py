@@ -1,13 +1,8 @@
 from dataclasses import dataclass, field
 import numpy as np
 from .state import LieState
-from lie import SO3
 import scipy
-from abc import ABC, abstractmethod
-from typing import Optional
 import manifpy as manif
-from scipy.spatial.transform import Rotation as Rot
-from datetime import datetime
 
 
 @dataclass
@@ -58,8 +53,7 @@ class ImuModel:
         acc_bias = np.exp(-dt * self.accel_bias_p) * state.acc_bias + w[9:12]
         # acc_bias = np.zeros(3)
         # gyro_bias[1] = 0
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
-                        initial_global_pos=state.initial_global_pos)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
 
     def h(self, state: LieState):
         return state.R.T @ state.vel
@@ -71,8 +65,7 @@ class ImuModel:
         new_extended_pose = tangent + state.extended_pose  # + tangent
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
-                        initial_global_pos=state.initial_global_pos)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
 
     @classmethod
     def phi(cls, state, xi):
@@ -83,8 +76,8 @@ class ImuModel:
 
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
-        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias,
-                        initial_global_pos=state.initial_global_pos)
+        return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
+                        
 
     @classmethod
     def phi_inv(cls, state, state_hat):
@@ -96,144 +89,5 @@ class ImuModel:
         d_acc_bias = state.acc_bias - state_hat.acc_bias
 
         return np.concatenate([tangent, d_gyro_bias, d_acc_bias])
-
-
-class Measurement(ABC):
-
-    def __init__(self, R):
-        self.R = R
-
-    @abstractmethod
-    def h(self):
-        pass
-
-
-class DvlMeasurement(Measurement):
-    def __init__(self, R, z: Optional[np.ndarray] = None):
-        self.R = R
-        self.dim = 3
-        if z is None:
-            z = np.zeros(3)
-        elif len(z) != 3:
-            raise ValueError("Dvl measurement must have 3 elements")
-        else:
-            self._z = z
-
-        self._nis = None
-        # Vector form the IMU frame to the DVL frame
-        self.lever_arm = np.array([-17e-2, 0, 26e-2])
-        self._lever_arm_comp = np.zeros(3)
-
-    @property
-    def lever_arm_comp(self):
-        return self._lever_arm_comp
-
-    @lever_arm_comp.setter
-    def lever_arm_comp(self, value):
-        self._lever_arm_comp = value
-
-    @property
-    def z(self):
-        return self._z
-
-    @z.setter
-    def z(self, val: np.ndarray):
-        self._z = val
-
-    def h(self, state: LieState, omega=np.zeros(3)) -> np.ndarray:
-        R = state.extended_pose.rotation()
-        # return state.extended_pose.linearVelocity()
-        return R.T @ state.extended_pose.linearVelocity() - self.lever_arm_comp
-
-    @property
-    def nis(self):
-        return self._nis
-
-    @nis.setter
-    def nis(self, nis):
-        self._nis = nis
-
-
-class Magnetometer(Measurement):
-    def __init__(self, R, z: Optional[np.ndarray] = None):
-        self.R = R
-        self.dim = 3
-        if z is None:
-            self._z = np.zeros(3)
-        elif len(z) != 3:
-            raise ValueError("Magnetometer measurement must have 3 elements")
-        else:
-            self._z = z
-
-    @property
-    def z(self):
-        return self._z
-
-    @z.setter
-    def z(self, val: np.ndarray):
-        self._z = val
-
-    def h(self, state: LieState) -> np.ndarray:
-        R = state.extended_pose.rotation()
-        return R.T @ state.get_mag_field()
-
-
-class DepthMeasurement(Measurement):
-    def __init__(self, R, z: Optional[float] = None):
-        self.R = R
-        self.dim = 1
-        if z is not None:
-            self._z = z
-        self._nis = None
-
-    @property
-    def z(self) -> float:
-        return self._z
-
-    @z.setter
-    def z(self, val):
-        self._z = val
-
-    def h(self, state: LieState) -> float:
-        return state.extended_pose.translation()[-1]
-
-    @property
-    def nis(self):
-        return self._nis
-
-    @nis.setter
-    def nis(self, nis):
-        self._nis = nis
-
-
-class GnssMeasurement(Measurement):
-    # GNSS measurement needs to be given in the local frame (x, y)
-    def __init__(self, R, z: Optional[np.ndarray] = None):
-        self.R = R
-        self.dim = 2
-        if z is not None:
-            self._z = z
-        self._nis = None
-
-        self.lever_arm = np.array([-35e-2, 0, -5e-2])
-
-    @property
-    def z(self) -> np.ndarray:
-        return self._z
-
-    @z.setter
-    def z(self, val: np.ndarray):
-        self._z = val
-
-    def h(self, state: LieState):
-        return state.extended_pose.translation()[:2]
-
-    @property
-    def nis(self):
-        return self._nis
-
-    @nis.setter
-    def nis(self, nis):
-        self._nis = nis
 
 

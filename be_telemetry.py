@@ -1,6 +1,6 @@
 import time
 import logging
-from foxglove import FoxgloveLogger
+from foxglove_wrapper import FoxgloveLogger
 import blueye
 from blueye.sdk import Drone
 import blueye.protocol as bp
