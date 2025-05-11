@@ -31,9 +31,10 @@ class RotationQuaterion(Orientation):
         if not np.allclose(norm, 1):
             self.eta /= norm
             self.epsilon /= norm
-        # if self.eta < 0:
-        #     self.eta *= -1
-        #     self.epsilon *= -1
+
+        if self.eta < 0:
+            self.eta *= -1
+            self.epsilon *= -1
 
     @property
     def R(self):
@@ -81,13 +82,15 @@ class RotationQuaterion(Orientation):
         return np.array([self.eta, *self.epsilon])
 
     def as_euler(self):
-        n = self.eta
-        e1, e2, e3 = self.epsilon
-        phi = np.atan2(2 * (e3 * e2 + n * e1), n**2 - e1**2 - e2**2 + e3**2)
-        theta = np.asin(2 * (n * e2 - e1 * e3))
-        psi = np.atan2(2 * (e1 * e2 + n * e3), n**2 + e1**2 - e2**2 - e3**2)
+        # n = self.eta
+        # e1, e2, e3 = self.epsilon
+        # phi = np.atan2(2 * (e3 * e2 + n * e1), n**2 - e1**2 - e2**2 + e3**2)
+        # theta = np.asin(2 * (n * e2 - e1 * e3))
+        # psi = np.atan2(2 * (e1 * e2 + n * e3), n**2 + e1**2 - e2**2 - e3**2)
 
-        return np.array([phi, theta, psi])
+        return Rot.from_quat(self._as_scipy_quat()).as_euler("xyz", degrees=True)
+
+        # return np.array([phi, theta, psi])
 
     @staticmethod
     def get_error_quat(qa, qb):
@@ -128,10 +131,10 @@ class AttitudeError:
         if len(arr) != 3:
             raise ValueError("Rodrigues parameter must be of length 3")
         rot = Rot.from_rotvec(arr)
-        quat = rot.as_quat(scalar_first=True)  # Returns [x, y, z, w] (SciPy convention!)
+        quat = rot.as_quat()  # Returns [x, y, z, w] (SciPy convention!)
 
     # SciPy returns (x, y, z, w) — we want (w, x, y, z) probably
-        return RotationQuaterion(eta=quat[0], epsilon=quat[1:])
+        return RotationQuaterion(eta=quat[-1], epsilon=quat[:3])
 
 
 def quaternion_weighted_average(quats, weights):

@@ -5,8 +5,10 @@ import utils
 from .state import NominalState, ErrorState
 from orientation import RotationQuaterion
 from utils import skew
-from .models import ImuModel, ImuMeasurement, Measurement
+from .models import ImuModel
+from messages_pb2 import UkfState
 
+from measurement_models import Measurement
 
 class ESEFK:
     def __init__(
@@ -19,6 +21,8 @@ class ESEFK:
         self.x_err = ErrorState.from_vec(np.zeros(x0.dof()))
         self.P = P0
         self.model = model
+        self.S_inv = None
+        self.innovation = None
 
     def Hx(self):
         """"Jacobian of the true state with respect to the error state"""
@@ -38,7 +42,6 @@ class ESEFK:
         Hx[10:, 9:] = np.eye(6)
         return Hx
 
-
     def propagate(self, u: np.ndarray, dt: float):
         """
         ESEKF prediction
@@ -54,10 +57,12 @@ class ESEFK:
         R = measurement.R
 
         S = H @ P @ H.T + R
-        K = (P @ H.T @ np.linalg.inv(S))
+        self.S_inv = np.linalg.inv(S)
+        K = (P @ H.T @ self.S_inv)
         z_pred = measurement.h(self.x)
         innovation = measurement.z - z_pred
-        innovation = np.atleast_1d(innovation).reshape(-1, 1)
+        self.innovation = np.atleast_1d(innovation)
+        innovation = self.innovation.reshape(-1, 1)
 
         x_err = K @ innovation
         self.x_err = ErrorState.from_vec(x_err.flatten())
@@ -76,6 +81,7 @@ class ESEFK:
         Chapter 6.2 eq. 282-286
         """
         dq = np.hstack(([1], 0.5 * self.x_err.theta.flatten()))
+        
 
         self.x = NominalState(
             ori=RotationQuaterion.multiply(self.x.ori, dq),
@@ -87,7 +93,47 @@ class ESEFK:
         # self.x.g = self.x.g + self.x_err.g
 
         G = np.eye(15)   # Can be left as eye
-        G[:3, :3] = np.eye(3) - self.x_err.theta
+        # G[:3, :3] = np.eye(3) - self.x_err.theta
 
         self.P = G @ self.P @ G.T
         self.x_err = ErrorState.from_vec(np.zeros(self.x.dof()))
+
+    def nees_pos(self, true_pos):
+        idx = 2
+        x_hat = self.x.position[:idx]
+        x = true_pos[:idx]
+        return (x_hat - x).T @ np.linalg.inv(self.P[:idx, :idx]) @ (x_hat - x)
+
+    def nis(self):
+        # Compute the NIS
+        return self.innovation.T @ self.S_inv @ self.innovation
+
+    def to_proto_msg(self):
+        quat = self.x.q
+
+        vel = self.x.R @ self.x.velocity
+        roll, pitch, yaw = self.x.euler
+
+        return UkfState(
+            position_x=self.x.position[0],
+            position_y=self.x.position[1],
+            position_z=self.x.position[2],
+            quaternion_w=quat[0],
+            quaternion_x=quat[1],
+            quaternion_y=quat[2],
+            quaternion_z=quat[3],
+            velocity_x=vel[0],
+            velocity_y=vel[1],
+            velocity_z=vel[2],
+            heading=yaw,
+            roll=roll,
+            pitch=pitch,
+            gyro_bias_x=self.x.gyroscope_bias[0],
+            gyro_bias_y=self.x.gyroscope_bias[1],
+            gyro_bias_z=self.x.gyroscope_bias[2],
+            accel_bias_x=self.x.accelerometer_bias[0],
+            accel_bias_y=self.x.accelerometer_bias[1],
+            accel_bias_z=self.x.accelerometer_bias[2],
+            covariance=np.diag(self.P)
+        )
+

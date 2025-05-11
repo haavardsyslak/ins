@@ -1,7 +1,8 @@
 import blueye.protocol as bp
 import numpy as np
 import ukfm
-from ukfm.models import ImuModel
+import esekf
+from orientation import RotationQuaterion
 from scipy.spatial.transform import Rotation as Rot
 import manifpy as manif
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -68,51 +69,7 @@ def get_initial_state(reader):
             return pos, velocity, heading, global_pos
 
 
-
-
-def make_proto_ukf_state(state):
-
-    extended_pose = state.extended_pose
-    g = state.g[-1]
-    quat = extended_pose.coeffs()[3:7]
-
-    rot = Rot.from_matrix(extended_pose.rotation())
-    roll, pitch, yaw = rot.as_euler("xyz", degrees=True)
-
-    return UkfState(
-        position_x=extended_pose.x(),
-        position_y=extended_pose.y(),
-        position_z=extended_pose.z(),
-        quaternion_w=quat[0],
-        quaternion_x=quat[1],
-        quaternion_y=quat[2],
-        quaternion_z=quat[3],
-        velocity_x=extended_pose.vx(),
-        velocity_y=extended_pose.vy(),
-        velocity_z=extended_pose.vz(),
-        heading=yaw,
-        g=g,
-        roll=roll,
-        pitch=pitch,
-        gyro_bias_x=state.gyro_bias[0],
-        gyro_bias_y=state.gyro_bias[1],
-        gyro_bias_z=state.gyro_bias[2],
-    )
-
-
-def make_location_fix(message: bp.PositionEstimateTel):
-    proto_timestamp = make_proto_timestamp(message.log_time_ns)
-    global_position = message.proto_msg.position_estimate.global_position
-
-    return LocationFix(
-        timestamp=proto_timestamp,
-        latitude=global_position.latitude,
-        longitude=global_position.longitude,
-        altitude=0.0,
-    )
-
-
-if __name__ == "__main__":
+def run_esekf():
     np.set_printoptions(precision=4, linewidth=999)
     global initial_global_pos
     # Create an instance of the reader
@@ -120,11 +77,65 @@ if __name__ == "__main__":
     # reader = McapProtobufReader("adis_mcap/gnss_challenging_env_2025-05-07 15:32:53.mcap")
     # reader = McapProtobufReader("adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap")
 
+    pos, vel, heading, initial_global_position = get_initial_state(reader)
+    pos[0] = 0.0
+    pos[1] = 0.0
 
-    # target_start = datetime.strptime("2025-04-05 11:51:15.782911", "%Y-%m-%d %H:%M:%S.%f")
-    # while reader.get_next_message().log_time < target_start:
-    #     continue
-    # Read messages one by one
+    # heading = np.deg2rad(50)
+    # heading = wrap_plus_minis_pi(heading)
+    rot = Rot.from_euler("xyz", [0, 0, heading])
+    q_scipy = rot.as_quat()
+    q = np.array([q_scipy[3], q_scipy[0], q_scipy[1], q_scipy[2]])
+    vel = rot.as_matrix() @ vel
+    # extended_pose = manif.SE_2_3(np.concatenate([pos, q_scipy, vel]))
+    print(Rot.from_quat(q, scalar_first=True).as_euler("xyz", degrees=True))
+    g = np.array([0.0, 0.0, -9.822])
+    gyro_bias = np.array([0.0, 0.0, 0.004])
+    accel_bias = np.array([0.0004, 0.001, -0.004])
+    q = RotationQuaterion(q[0], q[1:])
+    print("q as euler: ", q.as_euler())
+    x0 = esekf.NominalState(pos=pos, vel=vel, ori=q, gyro_bias=gyro_bias, acc_bias=accel_bias)
+    P0 = np.eye(x0.dof())
+    P0[0:3, 0:3] = 5 * np.eye(3)
+    # P0[2, 2] = 0.2**2
+    P0[3:6, 3:6] = 1e-6 * np.eye(3)
+    P0[6:9, 6:9] = 1e-9 * np.eye(3)
+    P0[9:12, 9:12] = 1e-4 * np.eye(3)
+    P0[12:15, 12:15] = 1e-4 * np.eye(3)
+
+    model = esekf.models.ImuModel(
+        gyro_std=8.73e-3,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
+        gyro_bias_std=9.7e-3,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
+        gyro_bias_p=0.00001,         # Gauss-Markov decay rate (correlation time ~1000 s)
+        accel_std=5.88e-2,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²term
+        accel_bias_std=3.5e-9,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
+        # Gauss-Markov decay rate (correlation time ~1000 s)       # accel_bias_p=0.0000001,
+        accel_bias_p=0.00001,
+    )
+
+    model = esekf.models.ImuModel(
+        gyro_std=8e-2,
+        gyro_bias_std=4e-4,
+        gyro_bias_p=0.000001,
+        accel_std=10,
+        accel_bias_std=0.0001,
+        accel_bias_p=0.00000001,
+    )
+    kf = esekf.ESEFK(x0, P0, model)
+
+    logger = FoxgloveLogger("01testing_esekf.mcap", stream=False)
+    runner = KFRunner(kf, logger, initial_global_position)
+    runner.run(reader)
+
+
+def run_ukfm():
+    np.set_printoptions(precision=4, linewidth=999)
+    global initial_global_pos
+    # Create an instance of the reader
+    reader = McapProtobufReader("adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap")
+    # reader = McapProtobufReader("adis_mcap/gnss_challenging_env_2025-05-07 15:32:53.mcap")
+    # reader = McapProtobufReader("adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap")
+
     pos, vel, heading, initial_global_position = get_initial_state(reader)
     pos[0] = 0.0
     pos[1] = 0.0
@@ -143,17 +154,17 @@ if __name__ == "__main__":
     x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, acc_bias=accel_bias)
     P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 5 * np.eye(3)
-    P0[2, 2] = 0.2**2
-    P0[3:6, 3:6] = 1e-2* np.eye(3)
-    P0[6:9, 6:9] = 0.15**2 * np.eye(3)
+    # P0[2, 2] = 0.2**2
+    P0[3:6, 3:6] = 1e-2 * np.eye(3)
+    P0[6:9, 6:9] = 5 * np.eye(3)
     P0[9:12, 9:12] = 1e-6 * np.eye(3)
     P0[12:15, 12:15] = 1e-6 * np.eye(3)
 
-    model = ImuModel(
-        gyro_std=8.73e-4,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
+    model = ukfm.models.ImuModel(
+        gyro_std=8.73e-2,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
         gyro_bias_std=9.7e-2,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
         gyro_bias_p=0.0001,         # Gauss-Markov decay rate (correlation time ~1000 s)
-        accel_std=5.88e-5,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²
+        accel_std=5.88e-1,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²
         accel_bias_std=3.5e-3,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
         # Gauss-Markov decay rate (correlation time ~1000 s)       # accel_bias_p=0.0000001,
         accel_bias_p=0.0001,
@@ -162,8 +173,8 @@ if __name__ == "__main__":
     dim_x = x0.dof()  # State dimension
     dim_q = model.Q.shape[0]  # Process noise dimension
 
-    points = SigmaPoints(dim_x, alpha=8e-1, beta=2, kappa=3-dim_x)
-    noise_points = SigmaPoints(dim_q, alpha=5e-5, beta=2, kappa=3-dim_q)
+    points = SigmaPoints(dim_x, alpha=8e-2, beta=2.0, kappa=3 - dim_x)
+    noise_points = SigmaPoints(dim_q, alpha=8e-5, beta=2.0, kappa=3 - dim_q)
     # points = SigmaPoints(dim_x, alpha=1e-2, beta=2, kappa=3-dim_x)
     # noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3-dim_q)
 
@@ -173,6 +184,9 @@ if __name__ == "__main__":
     runner = KFRunner(ukf, logger, initial_global_position)
     runner.run(reader)
 
-
     # run_ukf(ukf, reader)
+
+
+if __name__ == "__main__":
+    run_esekf()
 

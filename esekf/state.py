@@ -3,10 +3,11 @@ from orientation import RotationQuaterion
 import numpy as np
 from typing import Self
 import pymap3d as pm
+from istate import IState
 
 
 @dataclass
-class NominalState:
+class NominalState(IState):
     ori: RotationQuaterion
     vel: np.ndarray
     pos: np.ndarray
@@ -28,6 +29,37 @@ class NominalState:
         lat, lon, alt = pm.ned2geodetic(pos[0], pos[1], pos[2], lat0, long0, alt0)
 
         return lat, lon, alt
+
+    @property
+    def position(self) -> np.ndarray:
+        return self.pos
+
+    @property
+    def velocity(self) -> np.ndarray:
+        return self.vel
+
+    @property
+    def R(self) -> np.ndarray:
+        return self.ori.R
+
+    @property
+    def q(self) -> np.ndarray:
+        # print(self.extended_pose.coeffs()[3:7])
+        # input()
+        return self.ori.as_vec()
+        # return self.extended_pose.coeffs()[3:7]
+
+    @property
+    def euler(self) -> np.ndarray:
+        return self.ori.as_euler()
+
+    @property
+    def gyroscope_bias(self) -> np.ndarray:
+        return self.gyro_bias
+
+    @property
+    def accelerometer_bias(self) -> np.ndarray:
+        return self.acc_bias
 
 
 @dataclass

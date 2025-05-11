@@ -127,7 +127,7 @@ class UKFM:
 
     def nees_pos(self, true_pos):
         idx = 2
-        x_hat = self.x.extended_pose.translation()[:idx]
+        x_hat = self.x.position[:idx]
         x = true_pos[:idx]
         return (x_hat - x).T @ np.linalg.inv(self.P[:idx, :idx]) @ (x_hat - x)
 
