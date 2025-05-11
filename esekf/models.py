@@ -6,6 +6,7 @@ from orientation import RotationQuaterion, AttitudeError
 from utils import skew
 from typing import Tuple, Optional
 from abc import ABC, abstractmethod
+from scipy.spatial.transform import Rotation as Rot
 
 
 @dataclass
@@ -55,12 +56,13 @@ class ImuModel:
         We assume the change in orientation is negligable when caculating
         predicted position and velicity
         """
-        omega = u[:3] - state.gyro_bias
-        a_m = (u[3:6] * 9.80665) - state.acc_bias
+        omega = u[:3] #- state.gyro_bias
+        a_m = (u[3:6] * 9.80665)# - state.acc_bias
         # a_m[:2] *= -1
         Rq = state.ori.R
-        acc = Rq @ a_m + self.g
+        acc = (Rq @ a_m) + self.g
 
+        # omega[:2] = 0.0
         theta = omega * dt
         d_vel = acc * dt
 
@@ -69,6 +71,9 @@ class ImuModel:
 
         delta_rot = AttitudeError.from_rodrigues_param(theta)
         ori_pred = state.ori.multiply(delta_rot)
+        
+        # q = (Rot.from_matrix(Rq) * Rot.from_rotvec(theta)).as_quat()
+        # ori_pred = RotationQuaterion(q[-1], q[:3])
 
         acc_bias_pred = np.exp(-dt * self.accel_bias_p) * state.acc_bias
         gyro_bias_pred = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias
@@ -139,13 +144,11 @@ class ImuModel:
         G_c = self.get_error_G_c(state)
         GQGT_c = G_c @ self.Q_c @ G_c.T
 
-        # VanLoanMatrix = scipy.linalg.expm(np.block([[-F_c, GQGT_c],
-                                                    # [np.zeros((15, 15)), F_c.T]]) * dt)
+        VanLoanMatrix = scipy.linalg.expm(np.block([[-F_c, GQGT_c],
+                                                    [np.zeros((15, 15)), F_c.T]]) * dt)
 
-        # A_d = VanLoanMatrix[15:, 15:].T
-        # GQGT_d = A_d @ VanLoanMatrix[:15, 15:]
-        A_d = np.eye(15) + F_c * dt
-        GQGT_d = G_c @ self.Q_c @ G_c.T * dt
+        A_d = VanLoanMatrix[15:, 15:].T
+        GQGT_d = A_d @ VanLoanMatrix[:15, 15:]
 
         return A_d, GQGT_d
 

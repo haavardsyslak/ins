@@ -82,7 +82,7 @@ def run_esekf():
     pos[1] = 0.0
 
     # heading = np.deg2rad(50)
-    # heading = wrap_plus_minis_pi(heading)
+    heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("xyz", [0, 0, heading])
     q_scipy = rot.as_quat()
     q = np.array([q_scipy[3], q_scipy[0], q_scipy[1], q_scipy[2]])
@@ -98,29 +98,29 @@ def run_esekf():
     P0 = np.eye(x0.dof())
     P0[0:3, 0:3] = 5 * np.eye(3)
     # P0[2, 2] = 0.2**2
-    P0[3:6, 3:6] = 1e-6 * np.eye(3)
-    P0[6:9, 6:9] = 1e-9 * np.eye(3)
+    P0[3:6, 3:6] = 1e-2 * np.eye(3)
+    P0[6:9, 6:9] = 1e-2 * np.eye(3)
     P0[9:12, 9:12] = 1e-4 * np.eye(3)
     P0[12:15, 12:15] = 1e-4 * np.eye(3)
 
     model = esekf.models.ImuModel(
         gyro_std=8.73e-3,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
-        gyro_bias_std=9.7e-3,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
-        gyro_bias_p=0.00001,         # Gauss-Markov decay rate (correlation time ~1000 s)
-        accel_std=5.88e-2,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²term
-        accel_bias_std=3.5e-9,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
+        gyro_bias_std=9.7e-2,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
+        gyro_bias_p=0.001,         # Gauss-Markov decay rate (correlation time ~1000 s)
+        accel_std=5.88e-1,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²term
+        accel_bias_std=3.5e-3,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
         # Gauss-Markov decay rate (correlation time ~1000 s)       # accel_bias_p=0.0000001,
-        accel_bias_p=0.00001,
+        accel_bias_p=0.001,
     )
 
-    model = esekf.models.ImuModel(
-        gyro_std=8e-2,
-        gyro_bias_std=4e-4,
-        gyro_bias_p=0.000001,
-        accel_std=10,
-        accel_bias_std=0.0001,
-        accel_bias_p=0.00000001,
-    )
+    # model = esekf.models.ImuModel(
+    #     gyro_std=8e-2,
+    #     gyro_bias_std=4e-4,
+    #     gyro_bias_p=0.000001,
+    #     accel_std=,
+    #     accel_bias_std=0.0001,
+    #     accel_bias_p=0.00000001,
+    # )
     kf = esekf.ESEFK(x0, P0, model)
 
     logger = FoxgloveLogger("01testing_esekf.mcap", stream=False)

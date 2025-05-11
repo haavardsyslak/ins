@@ -10,6 +10,7 @@ from messages_pb2 import UkfState
 
 from measurement_models import Measurement
 
+
 class ESEFK:
     def __init__(
         self,
@@ -80,11 +81,21 @@ class ESEFK:
         Joan Solà. Quaternion kinematics for the error-state Kalman filter.
         Chapter 6.2 eq. 282-286
         """
-        dq = np.hstack(([1], 0.5 * self.x_err.theta.flatten()))
-        
+
+        theta = self.x_err.theta.flatten()
+        theta_norm = np.linalg.norm(theta)
+        # if theta_norm > 1e-8:
+        #     dq = np.hstack([
+        #         np.cos(theta_norm / 2),
+        #         np.sin(theta_norm) * theta / theta_norm
+        #     ])
+        # else:
+        dq = RotationQuaterion(eta=1, epsilon=0.5 * self.x_err.theta.flatten())
+
+        # dq /= np.linalg.norm(dq)
 
         self.x = NominalState(
-            ori=RotationQuaterion.multiply(self.x.ori, dq),
+            ori=self.x.ori.multiply(dq),
             pos=self.x.pos + self.x_err.pos,
             vel=self.x.vel + self.x_err.vel,
             gyro_bias=self.x.gyro_bias + self.x_err.gyro_bias,
@@ -93,7 +104,7 @@ class ESEFK:
         # self.x.g = self.x.g + self.x_err.g
 
         G = np.eye(15)   # Can be left as eye
-        # G[:3, :3] = np.eye(3) - self.x_err.theta
+        G[:3, :3] = np.eye(3) - self.x_err.theta
 
         self.P = G @ self.P @ G.T
         self.x_err = ErrorState.from_vec(np.zeros(self.x.dof()))
@@ -111,7 +122,7 @@ class ESEFK:
     def to_proto_msg(self):
         quat = self.x.q
 
-        vel = self.x.R @ self.x.velocity
+        vel = self.x.R.T @ self.x.velocity
         roll, pitch, yaw = self.x.euler
 
         return UkfState(
