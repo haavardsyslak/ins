@@ -10,6 +10,7 @@ from messages_pb2 import UkfState
 
 from measurement_models import Measurement
 
+
 class ESEFK:
     def __init__(
         self,
@@ -81,7 +82,6 @@ class ESEFK:
         Chapter 6.2 eq. 282-286
         """
         dq = np.hstack(([1], 0.5 * self.x_err.theta.flatten()))
-        
 
         self.x = NominalState(
             ori=RotationQuaterion.multiply(self.x.ori, dq),
@@ -92,7 +92,7 @@ class ESEFK:
         )
         # self.x.g = self.x.g + self.x_err.g
 
-        G = np.eye(15)   # Can be left as eye
+        G = np.eye(self.x.dof())   # Can be left as eye
         # G[:3, :3] = np.eye(3) - self.x_err.theta
 
         self.P = G @ self.P @ G.T
