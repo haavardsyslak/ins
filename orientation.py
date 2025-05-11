@@ -41,7 +41,7 @@ class RotationQuaterion(Orientation):
         """As rotation matrix"""
         # S = skew(self.epsilon)
         # R = np.eye(3) + 2 * self.eta * S + 2 * S @ S
-        return Rot.from_quat(self._as_scipy_quat()).as_matrix()
+        return Rot.from_quat(self.as_vec()).as_matrix()
 
         # return R
 

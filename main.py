@@ -104,7 +104,7 @@ def run_esekf():
     P0[12:15, 12:15] = 1e-4 * np.eye(3)
 
     model = esekf.models.ImuModel(
-        gyro_std=8.73e-3,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
+        gyro_std=8.73e-2,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
         gyro_bias_std=9.7e-2,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
         gyro_bias_p=0.001,         # Gauss-Markov decay rate (correlation time ~1000 s)
         accel_std=5.88e-1,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²term
