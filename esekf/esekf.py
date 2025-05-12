@@ -107,7 +107,6 @@ class ESEFK:
         # self.x.g = self.x.g + self.x_err.g
 
         G = np.eye(self.x.dof())   # Can be left as eye
-        # G[:3, :3] = np.eye(3) - self.x_err.theta
 
         self.P = G @ self.P @ G.T
         self.x_err = ErrorState.from_vec(np.zeros(self.x.dof()))
@@ -125,7 +124,7 @@ class ESEFK:
     def to_proto_msg(self):
         quat = self.x.q
 
-        vel = self.x.R @ self.x.velocity
+        vel = self.x.R.T @ self.x.velocity
         roll, pitch, yaw = self.x.euler
 
         return UkfState(

@@ -41,7 +41,7 @@ class ImuModel:
 
         theta = omega * dt
         d_vel = acc * dt
-        d_pos = Rt @ state.extended_pose.linearVelocity() * dt  # + .5 * acc * dt**2
+        d_pos = Rt @ state.extended_pose.linearVelocity() * dt #+ .5 * acc * dt**2
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
 

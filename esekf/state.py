@@ -20,18 +20,6 @@ class NominalState(IState):
     def dof(self):
         return 15
 
-    def to_global_position(self, initial_global_pos):
-        lat0 = initial_global_pos[0]
-        long0 = initial_global_pos[1]
-        alt0 = 0.0
-        if len(initial_global_pos) == 3:
-            alt0 = initial_global_pos[2]
-
-        pos = self.pos
-        lat, lon, alt = pm.ned2geodetic(pos[0], pos[1], pos[2], lat0, long0, alt0)
-
-        return lat, lon, alt
-
     @property
     def position(self) -> np.ndarray:
         return self.pos
@@ -80,7 +68,7 @@ class ErrorState:
             pos=vec[:3],
             vel=vec[3:6],
             theta=vec[6:9],
-            gyro_bias=vec[9:12],
-            acc_bias=vec[12:15],
+            acc_bias=vec[9:12],
+            gyro_bias=vec[12:15],
             # g=vec[15:17],
         )

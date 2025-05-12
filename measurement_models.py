@@ -66,32 +66,10 @@ class DvlMeasurement(Measurement):
         vx, vy, vz = state.velocity  # shape (3,)
 
         e1, e2, e3, n = q
-        # qw, qx, qy, qz = q
 
-        # Rotation matrix R(q)
-        # R = np.array([
-        #     [1 - 2*(qy**2 + qz**2),     2*(qx*qy - qz*qw),     2*(qx*qz + qy*qw)],
-        #     [2*(qx*qy + qz*qw),     1 - 2*(qx**2 + qz**2),     2*(qy*qz - qx*qw)],
-        #     [2*(qx*qz - qy*qw),         2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)]
-        # ])
-
-        # ∂h/∂v = R^T
         H_out[:, 3:6] = state.R.T
 
-        # # Unit vectors
-        # epsilon = np.array([qx, qy, qz])
-        # e1 = np.array([1, 0, 0])
-        # e2 = np.array([0, 1, 0])
-        # e3 = np.array([0, 0, 1])
-
-        # ∂h/∂q (analytical)
         H_q = np.zeros((3, 4))
-        # H_q[:, 0] = (4 * qw * np.eye(3) + 2 * skew(epsilon)) @ v
-        # H_q[:, 1] = 2 * ((np.outer(e1, epsilon) + np.outer(epsilon, e1) + qw * skew(e1)) @ v)
-        # H_q[:, 2] = 2 * ((np.outer(e2, epsilon) + np.outer(epsilon, e2) + qw * skew(e2)) @ v)
-        # H_q[:, 3] = 2 * ((np.outer(e3, epsilon) + np.outer(epsilon, e3) + qw * skew(e3)) @ v)
-
-        # H_q = np.hstack([dR_dqw, dR_dqx, dR_dqy, dR_dqz])
 
         H_q = np.array(
             [
@@ -205,7 +183,7 @@ class GnssMeasurement(Measurement):
         self._z = val
 
     def h(self, state: IState):
-        return state.position[:2] + self.lever_arm[:2]
+        return state.position[:2] + (state.R @ self.lever_arm)[:2]
 
     def H(self, state: IState):
         H = np.zeros((2, 16))

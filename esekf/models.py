@@ -57,8 +57,8 @@ class ImuModel:
         We assume the change in orientation is negligable when caculating
         predicted position and velicity
         """
-        omega = u[:3] - state.gyro_bias
-        a_m = (u[3:6] * 9.80665) - state.acc_bias
+        omega = u[:3] #- state.gyro_bias
+        a_m = (u[3:6] * 9.80665)# - state.acc_bias
         # a_m[:2] *= -1
 
         Rq = state.R
