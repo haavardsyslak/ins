@@ -31,7 +31,7 @@ class ImuModel:
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
-        omega = u[:3]  - state.gyro_bias + w[:3]
+        omega = u[:3] - state.gyro_bias + w[:3]
         # print(u[:3])
         a_m = (u[3:6] * 9.80665) - state.acc_bias + w[3:6]
         # print(a_m)
@@ -41,7 +41,7 @@ class ImuModel:
 
         theta = omega * dt
         d_vel = acc * dt
-        d_pos = Rt @ state.extended_pose.linearVelocity() * dt #+ .5 * acc * dt**2
+        d_pos = Rt @ state.extended_pose.linearVelocity() * dt  # + .5 * acc * dt**2
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
 
@@ -77,7 +77,6 @@ class ImuModel:
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
         return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
-                        
 
     @classmethod
     def phi_inv(cls, state, state_hat):

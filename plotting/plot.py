@@ -407,6 +407,7 @@ mpl.rcParams.update({
     "legend.fontsize": 11,
 })
 
+
 def ukfm_square_plots():
 # plot_3d_position(data, "UKFState")
     plot_xyz_with_std_bounds(
@@ -467,3 +468,4 @@ def ukfm_square_plots():
     plt.show()
 
 
+ukfm_square_plots()

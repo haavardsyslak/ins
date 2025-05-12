@@ -4,11 +4,13 @@ import numpy as np
 from typing import Self
 import pymap3d as pm
 from istate import IState
+import manifpy as manif
+from scipy.spatial.transform import Rotation as Rot
 
 
 @dataclass
 class NominalState(IState):
-    ori: RotationQuaterion
+    ori: manif.SO3
     vel: np.ndarray
     pos: np.ndarray
     acc_bias: np.ndarray
@@ -40,18 +42,18 @@ class NominalState(IState):
 
     @property
     def R(self) -> np.ndarray:
-        return self.ori.R
+        return self.ori.rotation()
 
     @property
     def q(self) -> np.ndarray:
         # print(self.extended_pose.coeffs()[3:7])
         # input()
-        return self.ori.as_vec()
+        return self.ori.coeffs()
         # return self.extended_pose.coeffs()[3:7]
 
     @property
     def euler(self) -> np.ndarray:
-        return self.ori.as_euler()
+        return Rot.from_matrix(self.R).as_euler("xyz", degrees=True)
 
     @property
     def gyroscope_bias(self) -> np.ndarray:

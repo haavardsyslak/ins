@@ -71,8 +71,9 @@ class KFRunner:
                 vel = self._parse_dvl(message)
                 fom = message.proto_msg.dvl_velocity.fom
                 # R_dvl = np.eye(3) * fom
-                R_dvl = np.diag([0.15**2, 0.15**2, 0.1**2])
-                R_dvl *= (1 + 1 * fom)
+                # R_dvl = np.diag([0.25**2, 0.25**2, 0.3**2]) * 0.1
+                R_dvl = np.eye(3) * 1e-7
+                # R_dvl *= (1 + 1 * fom)
 
                 # R_dvl = R_base * (1 + 1 * fom)
                 measurement = DvlMeasurement(R_dvl, vel)
@@ -80,8 +81,8 @@ class KFRunner:
                 self._publish_state(message.log_time_ns)
                 self._publish_raw(message)
 
-                nis = self.kf.nis()
-                self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
+                # nis = self.kf.nis()
+                # self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
 
             case "blueye.protocol.PositionEstimateTel":
                 message = self._parse_drone_pos_estimate(message)
@@ -97,12 +98,12 @@ class KFRunner:
                         ned_pos = gnss_pos.to_ned(self.initial_global_pos)
                         self._publish_pose(message.log_time_ns, "gnss.Pose", ned_pos, "gnss")
                         self._publish_position(gnss_pos, "gnss.LocationFix", message.log_time_ns)
-                        nees = self.kf.nees_pos(ned_pos)
-                        self._publish_nees("NEES pos", nees, message.log_time_ns)
+                        # nees = self.kf.nees_pos(ned_pos)
+                        # self._publish_nees("NEES pos", nees, message.log_time_ns)
                         error = self.kf.x.position - ned_pos
                         z = ned_pos[:2]
                         if self.elapsed_time < 100:
-                            R_gnss = np.diag([2.5**2, 2.5**2])
+                            R_gnss = np.eye(2) * gnss_sensor.std**2
                             measurement = GnssMeasurement(R_gnss, z)
                             self.kf.update(measurement, 0.0)
                         elif self.last_gnss_time > 1:
@@ -115,10 +116,12 @@ class KFRunner:
                 self._publish_raw(message)
                 depth = self._parse_depth(message)
                 self.last_depth = depth
-                z = DepthMeasurement(0.03**2, depth)
+                R_depth = 0.01**2 * np.eye(1)
+                # R_depth = 1e-9 * np.eye(1)
+                z = DepthMeasurement(R_depth, depth)
                 self.kf.update(z, 0.0)
-                nis = self.kf.nis()
-                self._publish_nis("Depth.Nis", nis, message.log_time_ns)
+                # nis = self.kf.nis()
+                # self._publish_nis("Depth.Nis", nis, message.log_time_ns)
                 
     def _publish_pos_error(self, log_time, error):
         msg = PositionError(x=error[0], y=error[1], z=0)
@@ -225,6 +228,7 @@ class KFRunner:
 
     def run(self, reader: McapProtobufReader):
         msg = reader.get_next_message()
+        self._publish_state(msg.log_time_ns)
         self._publish_reference_frame(msg.log_time_ns)
 
         for message in tqdm(reader):

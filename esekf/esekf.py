@@ -7,6 +7,7 @@ from orientation import RotationQuaterion
 from utils import skew
 from .models import ImuModel
 from messages_pb2 import UkfState
+import manifpy as manif
 
 from measurement_models import Measurement
 
@@ -27,7 +28,7 @@ class ESEFK:
 
     def Hx(self):
         """"Jacobian of the true state with respect to the error state"""
-        n, qx, qy, qz = self.x.ori.as_vec()
+        qx, qy, qz,n = self.x.q
         Q_d_theta = .5 * np.array(
             [
                 [-qx, -qy, -qz,],
@@ -81,10 +82,23 @@ class ESEFK:
         Joan Solà. Quaternion kinematics for the error-state Kalman filter.
         Chapter 6.2 eq. 282-286
         """
-        dq = np.hstack(([1], 0.5 * self.x_err.theta.flatten()))
+
+        theta = self.x_err.theta.flatten()
+        theta_norm = np.linalg.norm(theta)
+        # if theta_norm > 1e-8:
+        #     dq = np.hstack([
+        #         np.cos(theta_norm / 2),
+        #         np.sin(theta_norm) * theta / theta_norm
+        #     ])
+        # else:
+        # dq = RotationQuaterion(eta=1, epsilon=0.5 * self.x_err.theta.flatten())
+        tangent = manif.SO3Tangent(self.x_err.theta)
+        ori = self.x.ori.rplus(tangent)
+        
+        # dq /= np.linalg.norm(dq)
 
         self.x = NominalState(
-            ori=RotationQuaterion.multiply(self.x.ori, dq),
+            ori=ori, #dq.multiply(self.x.ori), #.multiply(dq),
             pos=self.x.pos + self.x_err.pos,
             vel=self.x.vel + self.x_err.vel,
             gyro_bias=self.x.gyro_bias + self.x_err.gyro_bias,
