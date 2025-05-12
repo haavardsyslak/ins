@@ -4,61 +4,57 @@ from orientation import RotationQuaterion, AttitudeError, average, quaternion_we
 from sigma_points import SigmaPoints
 # from dataclasses import dataclass
 # from typing import Callable
-from models import ImuModelLie, ImuModelQuat, Measurement
-from state import LieState, NominalState
+from .models import ImuModel
+from .state import State
 from scipy.spatial.transform import Rotation as Rot
 from sigma_points import MwereSigmaPoints
+from messages_pb2 import UkfState
 
 
 class QUKF:
     def __init__(
         self,
         model,
-        dim_x,
         dim_q,
         x0,
         P0,
         sigma_points,
-        Q,
-        R=None,
     ):
         self.model = model
-        self.dim_x = dim_x
+        self.dim_x = x0.dof()
         self.dim_q = dim_q
         self.w = np.zeros(dim_q)  # Noise mean
         self.x = x0
         self.P = P0
-        n = P0.shape[0] + Q.shape[0]
+        n = self.dim_x + self.dim_q
         self.P_aug = np.zeros((n, n))
+        self.P_aug[:self.dim_x, :self.dim_x] = self.P
+        self.P_aug[self.dim_x:, self.dim_x:] = self.model.Q
         self.sigma_points = sigma_points
-        self.Q = Q
-        self.R = R
-        self.propgated_sigmas = np.zeros((self.sigma_points.num_sigmas, self.dim_x + 1))
+        self.propgated_sigmas = np.tile(self.x.as_vec(), (self.sigma_points.num_sigmas, 1))
         self.delta_sigmas = np.zeros((self.sigma_points.num_sigmas, self.dim_x))
+        self.S_inv = None
+        self.innovation = None
 
     def propagate(self, u, dt):
-        self.P += np.eye(self.dim_x) * 1e-9
-        if self.Q is not None:
-            Q = self.Q
-        else:
-            Q = self.model.Q * dt
+        self.P += np.eye(self.dim_x) * 1e-3
+        Q = self.model.Q
 
 
+        # Augment the covariance matrix
         self.P_aug[:self.dim_x, :self.dim_x] = self.P
         self.P_aug[self.dim_x:, self.dim_x:] = Q
 
+        # Generate zero mean error sigma points
         delta_x_aug_sigmas = self.sigma_points.compute_sigma_points(self.P_aug)
         sigmas = self.propgated_sigmas
         # sigmas[0] = self.model.f(self.x, dt, np.zeros(self._dim_q)).as_vec()
         for i, delta_x_aug in enumerate(delta_x_aug_sigmas):
             delta_x = delta_x_aug[:self.dim_x]
             w = delta_x_aug[self.dim_x:]
-            xi = NominalState.add_error_state(self.x, delta_x)
-            sigmas[i] = self.model.f(xi, u, dt, w).as_vec()
+            xi = State.add_error_state(self.x, delta_x)
+            sigmas[i] = self.model.f(xi, u, dt, w)
 
-
-        # q_bar = average(sigmas[:, :4])
-        # print("q_bar: ", q_bar)
         q_bar = quaternion_weighted_average(sigmas[:, :4], self.sigma_points.Wm)
         # print("q_bar", q_bar)
 
@@ -69,31 +65,35 @@ class QUKF:
         for i, sigma in enumerate(sigmas):
             # x = State.from_vec(sigma)
             # dx = x.to_error_state(x_bar)
-            dx = NominalState.to_error_state(sigma, x_bar)
+            dx = State.to_error_state(sigma, x_bar)
             P += self.sigma_points.Wc[i] * np.outer(dx, dx)
             self.delta_sigmas[i] = dx
 
+        eigvals, eigvecs = np.linalg.eigh(P)
+        eigvals[eigvals < 0] = 0
+        P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        self.P = (P_psd + P_psd.T) / 2      
         # TODO: when biases are added, we need to add the noise for the biases to the biases
-        self.P = (P + P.T) / 2
-        self.x = NominalState.from_vec(x_bar)
+        # self.P = (P + P.T) / 2
+        self.x = State.from_vec(x_bar)
         self.propgated_sigmas = sigmas
 
-    def update(self, measurement: Measurement, dt: float, R=None):
-        self.P += np.eye(self.dim_x) * 1e-9
-        if R is None:
-            R = measurement.R
+    def update(self, measurement, dt: float, R=None):
+        self.P += np.eye(self.dim_x) * 1e-3
 
+        R = measurement.R
         z = measurement.z
+
+        xis = self.sigma_points.compute_sigma_points(self.P_aug)
         sigmas_z = np.zeros((self.sigma_points.num_sigmas, measurement.dim))
         for i, sigma in enumerate(self.propgated_sigmas):
             # x = State.add_error_state(self.x, sigma)
-            x = NominalState.from_vec(sigma)
+            x = State.from_vec(sigma)
             sigmas_z[i] = measurement.h(x)
-
 
         z_hat = np.dot(self.sigma_points.Wm, sigmas_z)
         
-        y = sigmas_z - z_hat[np.newaxis, :]
+        # y = sigmas_z - z_hat[np.newaxis, :]
         Wc_diag = np.diag(self.sigma_points.Wc)
         # S = np.dot(y.T, np.dot(Wc_diag, y)) + measurement.R
         # S_inv = np.linalg.inv(S)
@@ -105,7 +105,7 @@ class QUKF:
         sigmas = self.propgated_sigmas
         # print(self.sigma_points.Wc)
         for i in range(self.sigma_points.num_sigmas):
-            dx = NominalState.to_error_state(sigmas[i], x)
+            dx = State.to_error_state(sigmas[i], x)
             dz = sigmas_z[i] - z_hat
             Pxz += self.sigma_points.Wc[i] * np.outer(dx, dz)
             S += self.sigma_points.Wc[i] * np.outer(dz, dz)
@@ -114,129 +114,59 @@ class QUKF:
         # dz = sigmas_z - z_hat[np.newaxis, :]
         # Pxz = (self.sigma_points.Wc * self.delta_sigmas) @ dz
         # S_inv = np.linalg.inv(S)
-        S_inv = S
-        innov = z - z_hat
+        self.S_inv = np.linalg.inv(S)
+        # self.S_inv = np.linalg.inv(S)
+        self.innovation = z - z_hat
 
-        K = Pxz @ S_inv
-        print(K)
+        K = Pxz @ self.S_inv
 
-        dx = K @ innov
-        self.x = NominalState.add_error_state(self.x, dx)
+        dx = K @ self.innovation
+        self.x = State.add_error_state(self.x, dx)
         P = self.P - K @ S @ K.T
-        self.P = (P + P.T) / 2
+        eigvals, eigvecs = np.linalg.eigh(P)
+        eigvals[eigvals < 0] = 0
+        P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        self.P = (P_psd + P_psd.T) / 2      
+
+    def nees_pos(self, true_pos):
+        idx = 2
+        x_hat = self.x.position[:idx]
+        x = true_pos[:idx]
+        return (x_hat - x).T @ np.linalg.inv(self.P[:idx, :idx]) @ (x_hat - x)
+
+    def nis(self):
+        # Compute the NIS
+        return self.innovation.T @ self.S_inv @ self.innovation
+
+    def to_proto_msg(self):
+        quat = self.x.q
+
+        pos = self.x.position
+        vel = self.x.R.T @ self.x.velocity
+        rot = Rot.from_matrix(self.x.R)
+        roll, pitch, yaw = rot.as_euler("xyz", degrees=True)
+
+        return UkfState(
+            position_x=pos[0],
+            position_y=pos[1],
+            position_z=pos[2],
+            quaternion_w=quat[0],
+            quaternion_x=quat[1],
+            quaternion_y=quat[2],
+            quaternion_z=quat[3],
+            velocity_x=vel[0],
+            velocity_y=vel[1],
+            velocity_z=vel[2],
+            heading=yaw,
+            roll=roll,
+            pitch=pitch,
+            # gyro_bias_x=self.x.gyro_bias[0],
+            # gyro_bias_y=self.x.gyro_bias[1],
+            # gyro_bias_z=self.x.gyro_bias[2],
+            # accel_bias_x=self.x.acc_bias[0],
+            # accel_bias_y=self.x.acc_bias[1],
+            # accel_bias_z=self.x.acc_bias[2],
+            covariance=np.diag(self.P)
+        )
 
 
-class UKFM:
-    def __init__(
-        self,
-        dim_x: int,
-        dim_q: int,
-        points: SigmaPoints,
-        noise_points: SigmaPoints,
-        model: ImuModelLie,
-        x0: LieState,
-        P0: np.ndarray,
-        Q=None,
-        R=None,
-    ):
-        self.points = points
-        self.noise_points = noise_points
-        self.dim_q = dim_q
-        self.dim_x = dim_x
-        # self.dim_z
-        self.x = x0
-        self.P = P0
-        self.model = model
-        self.phi = self.model.phi
-        self.phi_inv = self.model.phi_inv
-        self.Q = Q
-        self.R = R
-
-    def propagate(self, u, dt):
-        # Q = self.model.Q_c
-        self.P += 1e-9 * np.eye(self.P.shape[0])
-
-        if self.Q is not None:
-            Q = self.Q * dt  # TOOO: need to get the discritized Q mat
-        else:
-            Q = self.model.Q * dt
-
-        w_q = np.zeros(self.dim_q)
-        # Predict the nominal state
-        x_pred = self.model.f(self.x, u, dt, w_q)
-        # Points in the Lie algebra
-        xis = self.points.compute_sigma_points(np.zeros(self.dim_x), self.P)
-        # Points in the manifold
-        new_xis = np.zeros_like(xis)
-        # Retract the sigma points onto the manifold
-        for i, point in enumerate(xis):
-            s = self.phi(self.x, point)
-            new_s = self.model.f(s, u, dt, w_q)
-            new_xis[i] = self.phi_inv(x_pred, new_s)
-
-        new_xi = self.points.Wm_i * np.sum(
-            new_xis, 0
-        )  # + self.points.Wm_0 * self.model.phi_inv(self.x, x_pred)
-        new_xis = new_xis - new_xi
-
-        P = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(new_xi, new_xi)
-
-        # Now do the same for the noise term
-        # Compute noise sigma poinst
-        noise_sigmas = self.noise_points.compute_sigma_points(w_q, Q)
-
-        new_xis = np.zeros((self.points.num_sigmas, self.dim_x))
-        # Propagation of uncertainty
-        for i, point in enumerate(noise_sigmas):
-            s = self.model.f(self.x, u, dt, point)
-            new_xis[i] = self.phi_inv(x_pred, s)
-
-        # Compute the covariance
-        xi_bar = self.noise_points.Wm_i * np.sum(new_xis, 0)
-        # xi_bar ="" (1 / self.noise_points.num_sigmas) * np.sum(new_xis, 0)
-        new_xis = new_xis - xi_bar
-
-        Q = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(xi_bar, xi_bar)
-        self.P = P + Q
-        # self.P = (self.P + self.P.T) / 2
-        self.x = x_pred
-        # self.x = self.model.phi(x_pred, new_xi)
-
-    def update(self, measurement, dt, h=None, R=None):
-        self.P += 1e-8 * np.zeros_like(self.P)
-        h = measurement.h
-
-        if R is None:
-            R = measurement.R
-
-        z = measurement.z
-
-        xis = self.points.compute_sigma_points(np.zeros((self.dim_x)), self.P)
-
-        new_xis = np.zeros((self.points.num_sigmas, measurement.dim))
-        y0 = h(self.x)
-
-        for i, point in enumerate(xis):
-            new_xis[i] = h(self.phi(self.x, point))
-
-        z_pred_bar = self.points.Wm_i * np.sum(new_xis, 0) + self.points.Wm_0 * y0
-        # z_pred_bar = 1 / len(new_xis) * np.sum(new_xis, 0)
-
-        dz = y0 - z_pred_bar
-        new_xis = new_xis - z_pred_bar
-
-        S = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(dz, dz) + R
-        Pxz = self.points.Wc_i * np.hstack([xis[:9].T, xis[9:].T]).dot(new_xis)
-        S_inv = np.linalg.inv(S)
-
-        K = Pxz @ S_inv
-        # K = np.linalg.solve(S, Pxz.T).T
-        innov = z - z_pred_bar
-        xi_plus = K @ innov
-
-        self.x = self.phi(self.x, xi_plus)
-
-        self.P -= K @ S @ K.T
-
-        # Avoid non sysmetric matrices
-        self.P = (self.P + self.P.T) / 2
