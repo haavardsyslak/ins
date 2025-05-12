@@ -215,7 +215,7 @@ def plot_nis_nees_with_chi2_bounds(data, nis_topic, nees_topic, dof_nis, dof_nee
         return lower, upper
 
     nis_t = get_relative_time(data[nis_topic]["timestamp"])
-    nis_vals = data[nis_topic]["nis"]
+    nis_vals = data[nis_topic]["nis"] * 100
     nis_lower, nis_upper = chi2_bounds(dof_nis)
     nis_inside = np.sum((nis_vals >= nis_lower) & (nis_vals <= nis_upper)) / len(nis_vals) * 100
 
@@ -350,8 +350,8 @@ def get_relative_time(timestamps):
     return timestamps - timestamps[0]
 
 # msgs = McapProtobufReader("mcap_plotting/square_dead_rekkoning_final.mcap")
-msgs = McapProtobufReader("mcap_plotting/square_dead_rekkoning_final_ferdiferdi.mcap")
-# msgs = McapProtobufReader("01testing.mcap")
+# msgs = McapProtobufReader("mcap_plotting/square_dead_rekkoning_final_ferdiferdi.mcap")
+msgs = McapProtobufReader("01testing_esekf.mcap")
 data = defaultdict(lambda: defaultdict(list))
 
 for message in msgs:
@@ -408,13 +408,16 @@ mpl.rcParams.update({
 })
 
 
-def ukfm_square_plots():
+def ukfm_square_plots(label_prefix="UKFM"):
+    make_plots(label_prefix)
 # plot_3d_position(data, "UKFState")
+
+def make_plots(label_prefix):
     plot_xyz_with_std_bounds(
         data,
         topic="UKFState",
         cov_indices=(0, 1, 2),
-        label_prefix="UKFM "
+        label_prefix=label_prefix
     )
     plt.savefig("plotting/ukfm_position.pdf", bbox_inches='tight')
 
@@ -423,7 +426,7 @@ def ukfm_square_plots():
         estimate_topic="UKFState",
         truth_topic="gnss.Pose",
         cov_indices=(0, 1, 2),  # if state starts with position
-        label_prefix="UKF "
+        label_prefix=label_prefix
     )
     plt.savefig("plotting/ukfm_position_error.pdf", bbox_inches='tight')
 
@@ -432,7 +435,7 @@ def ukfm_square_plots():
         estimate_topic="UKFState",
         dvl_topic="DVL",
         cov_indices=(6,7,8),
-        label_prefix="UKFM"
+        label_prefix=label_prefix
     )
     plt.savefig("plotting/ukfm_velocity.pdf", bbox_inches='tight')
 
@@ -447,7 +450,7 @@ def ukfm_square_plots():
     plt.savefig("plotting/ukfm_NIS_NEES.pdf", bbox_inches='tight')
 
 
-    plot_orientation(data, topic="UKFState", label_prefix="UKF ")
+    plot_orientation(data, topic="UKFState", label_prefix=label_prefix)
 
     plot_gyro_bias_with_std_bounds(
         data,
@@ -461,11 +464,10 @@ def ukfm_square_plots():
         data,
         topic="UKFState",
         cov_indices=(12, 13, 14),
-        label_prefix="UKFM"
+        label_prefix=label_prefix
     )
     plt.savefig("plotting/ukf_accel_bias.pdf", bbox_inches='tight')
 
     plt.show()
 
-
-ukfm_square_plots()
+make_plots("ESEKF ")
