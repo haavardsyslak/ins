@@ -6,6 +6,7 @@ import utils
 from typing import Self
 import math
 from tqdm import tqdm
+from tuning import ESEKFTuning, UKFMTuning
 
 # from models import DvlMeasurement, DepthMeasurement, GnssMeasurement
 from foxglove_schemas_protobuf.LocationFix_pb2 import LocationFix
@@ -52,6 +53,10 @@ class KFRunner:
         self.elapsed_time = 0.0
         self.last_gnss_time = 0.0
         self.last_depth = 0.0
+        if "esekf" in str(kf.__class__):
+            self.tuning = ESEKFTuning()
+        elif "ukfm" in str(kf.__class__):
+            self.tuning = UKFMTuning()
 
     def handle_message(self, message):
         topic = message.topic
@@ -70,19 +75,14 @@ class KFRunner:
             case "blueye.protocol.DvlVelocityTel":
                 vel = self._parse_dvl(message)
                 fom = message.proto_msg.dvl_velocity.fom
-                # R_dvl = np.eye(3) * fom
-                # R_dvl = np.diag([0.25**2, 0.25**2, 0.3**2]) * 0.1
-                R_dvl = np.eye(3) * 1e-7
-                # R_dvl *= (1 + 1 * fom)
-
-                # R_dvl = R_base * (1 + 1 * fom)
+                R_dvl = self.tuning.R_dvl(fom)
                 measurement = DvlMeasurement(R_dvl, vel)
                 self.kf.update(measurement, 0.0)
                 self._publish_state(message.log_time_ns)
                 self._publish_raw(message)
 
-                # nis = self.kf.nis()
-                # self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
+                nis = self.kf.nis()
+                self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
 
             case "blueye.protocol.PositionEstimateTel":
                 message = self._parse_drone_pos_estimate(message)
@@ -98,30 +98,31 @@ class KFRunner:
                         ned_pos = gnss_pos.to_ned(self.initial_global_pos)
                         self._publish_pose(message.log_time_ns, "gnss.Pose", ned_pos, "gnss")
                         self._publish_position(gnss_pos, "gnss.LocationFix", message.log_time_ns)
-                        # nees = self.kf.nees_pos(ned_pos)
-                        # self._publish_nees("NEES pos", nees, message.log_time_ns)
+                        nees = self.kf.nees_pos(ned_pos)
+                        self._publish_nees("NEES pos", nees, message.log_time_ns)
                         error = self.kf.x.position - ned_pos
                         z = ned_pos[:2]
                         if self.elapsed_time < 100:
-                            R_gnss = np.eye(2) * gnss_sensor.std**2
+                            R_gnss = self.tuning.R_gnss()
                             measurement = GnssMeasurement(R_gnss, z)
                             self.kf.update(measurement, 0.0)
                         elif self.last_gnss_time > 1:
                             self.last_gnss_time = 0
                             R_gnss = np.diag([500, 500])
                             measurement = GnssMeasurement(R_gnss, z)
-                            self.kf.update(measurement, 0.0)
+                            # self.kf.update(measurement, 0.0)
 
             case "blueye.protocol.DepthTel":
                 self._publish_raw(message)
                 depth = self._parse_depth(message)
                 self.last_depth = depth
-                R_depth = 0.01**2 * np.eye(1)
+                R_depth = self.tuning.R_depth()
+                # R_depth = 0.01**2 * np.eye(1)
                 # R_depth = 1e-9 * np.eye(1)
                 z = DepthMeasurement(R_depth, depth)
                 self.kf.update(z, 0.0)
-                # nis = self.kf.nis()
-                # self._publish_nis("Depth.Nis", nis, message.log_time_ns)
+                nis = self.kf.nis()
+                self._publish_nis("Depth.Nis", nis, message.log_time_ns)
                 
     def _publish_pos_error(self, log_time, error):
         msg = PositionError(x=error[0], y=error[1], z=0)
