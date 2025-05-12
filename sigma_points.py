@@ -45,13 +45,15 @@ class MwereSigmaPoints:
         self.Wm[0] = lambda_ / (self.n + lambda_)
 
     def compute_sigma_points(self, P):
-        L = scipy.linalg.cholesky((self.n + self.lambda_) * P).T
+        L = np.linalg.cholesky((self.n + self.lambda_) * P, upper=False).T
 
         points = np.zeros((self.num_sigmas, self.n))
 
         points[0] = np.zeros(P.shape[0])
 
         for i in range(self.n):
+            # points[i + 1] = L[:, i]
+            # points[i + 1 + self.n] = -L[:, i]
             points[i + 1] = L[i]
             points[i + self.n + 1] = -L[i]
 
