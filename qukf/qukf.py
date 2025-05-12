@@ -43,7 +43,6 @@ class QUKF:
         else:
             Q = self.model.Q * dt
 
-        Q = self.model.Q * dt
 
         self.P_aug[:self.dim_x, :self.dim_x] = self.P
         self.P_aug[self.dim_x:, self.dim_x:] = Q

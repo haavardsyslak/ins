@@ -18,6 +18,7 @@ class ImuModelQuat:
     acc_std: float
     acc_bias_std: float
     acc_bias_p: float
+    g: 'np.ndarray[3]' = field(default_factory=lambda: np.array([0, 0, 9.819]))
 
     Q: np.ndarray = field(init=False, repr=False)
 
@@ -29,8 +30,8 @@ class ImuModelQuat:
 
     def f(self, state: NominalState, u: np.ndarray, dt: float, w: np.ndarray):
         omega = u[:3] + w[:3]
-        acc = (u[3:6] * 9.81) + w[3:6]
-        acc_n_frame = state.ori.R @ acc - self.g
+        a_m = (u[3:6] * 9.80665) + w[3:6]
+        acc = state.R @ a_m + self.g
 
         delta_rot = Rot.from_rotvec(omega * dt).as_quat(scalar_first=True)
         q = state.ori @ delta_rot  # SU2.Exp(omega, dt)
