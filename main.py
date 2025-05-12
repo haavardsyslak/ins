@@ -2,6 +2,7 @@ import blueye.protocol as bp
 import numpy as np
 import ukfm
 import esekf
+import qukf
 from orientation import RotationQuaterion
 from scipy.spatial.transform import Rotation as Rot
 import manifpy as manif
@@ -13,7 +14,7 @@ import pymap3d as pm
 from utils import wrap_plus_minis_pi
 from messages_pb2 import UkfState
 from datetime import datetime
-from sigma_points import SigmaPoints, SimplexSigmaPoints
+from sigma_points import SigmaPoints, SimplexSigmaPoints, MwereSigmaPoints
 from foxglove_wrapper import McapProtobufReader
 from filter_interface import KFRunner, GlobalPos
 
@@ -171,7 +172,6 @@ def run_ukfm():
         accel_bias_p=0.000001,
     )
 
-
     dim_x = x0.dof()  # State dimension
     dim_q = model.Q.shape[0]  # Process noise dimension
 
@@ -187,10 +187,69 @@ def run_ukfm():
     runner = KFRunner(ukf, logger, initial_global_position)
     runner.run(reader)
 
-    # run_ukf(ukf, reader)
+
+def run_qukf():
+    np.set_printoptions(precision=4, linewidth=999)
+    global initial_global_pos
+    # Create an instance of the reader
+    reader = McapProtobufReader("adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap")
+    # reader = McapProtobufReader("adis_mcap/gnss_challenging_env_2025-05-07 15:32:53.mcap")
+    # reader = McapProtobufReader("adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap")
+
+    pos, vel, heading, initial_global_position = get_initial_state(reader)
+    pos[0] = 0.0
+    pos[1] = 0.0
+
+    # heading = np.deg2rad(50)
+    heading = wrap_plus_minis_pi(heading)
+    rot = Rot.from_euler("xyz", [0, 0, heading])
+    q_scipy = rot.as_quat()
+    q = np.array([q_scipy[3], q_scipy[0], q_scipy[1], q_scipy[2]])
+    vel = rot.as_matrix() @ vel
+    extended_pose = manif.SE_2_3(np.concatenate([pos, q_scipy, vel]))
+    print(Rot.from_quat(q, scalar_first=True).as_euler("xyz", degrees=True))
+    g = np.array([0.0, 0.0, -9.822])
+    gyro_bias = np.array([0.0, 0.0, 0.004])
+    accel_bias = np.array([0.0004, 0.001, -0.004])
+    x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, acc_bias=accel_bias)
+    ori = manif.SO3(q_scipy)
+    x0 = qukf.State(ori=ori, pos=pos, vel=vel)
+    P0 = np.eye(x0.dof())
+    P0[0:3, 0:3] = 1e-2 * np.eye(3)
+    # P0[2, 2] = 0.2**2
+    P0[3:6, 3:6] = 5 * np.eye(3)
+    P0[6:9, 6:9] = 0.5 * np.eye(3)
+    # P0[9:12, 9:12] = 1e-6 * np.eye(3)
+    # P0[12:15, 12:15] = 1e-6 * np.eye(3)
+
+    model = qukf.models.ImuModel(
+        gyro_std=8.73e-2,          # Gyroscope output noise ≈ 0.05 deg/s → 8.73e-4 rad/s
+        gyro_bias_std=9.7e-1,      # In-run bias stability ≈ 2 deg/hr → 9.7e-6 rad/s
+        gyro_bias_p=0.000001,         # Gauss-Markov decay rate (correlation time ~1000 s)
+        accel_std=5.88e-1,         # Accelerometer output noise ≈ 0.6 mg → 5.88e-3 m/s²
+        accel_bias_std=3.5e-1,     # Accelerometer in-run bias ≈ 3.6 µg → 3.5e-5 m/s²
+        # Gauss-Markov decay rate (correlation time ~1000 s)       # accel_bias_p=0.0000001,
+        accel_bias_p=0.000001,
+    )
+
+    dim_x = x0.dof()  # State dimension
+    dim_q = model.Q.shape[0]  # Process noise dimension
+
+    points = MwereSigmaPoints(dim_x + dim_q, alpha=1e-2, beta=2.0, kappa=0)
+    # noise_points = SigmaPoints(dim_q, alpha=5e-3, beta=2.0, kappa=0)
+
+    # points = SigmaPoints(dim_x, alpha=1e-2, beta=2, kappa=3-dim_x)
+    # noise_points = SigmaPoints(dim_q, alpha=1e-4, beta=2, kappa=3-dim_q)
+
+    kf = qukf.QUKF(model, dim_q, x0, P0, points)
+
+    logger = FoxgloveLogger("01testing.mcap", stream=True)
+    runner = KFRunner(kf, logger, initial_global_position)
+    runner.run(reader)
 
 
 if __name__ == "__main__":
-    run_esekf()
+    run_qukf()
+    # run_esekf()
     # run_ukfm()
 
