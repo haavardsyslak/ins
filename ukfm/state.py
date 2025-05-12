@@ -14,11 +14,6 @@ class LieState(IState):
     gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
     acc_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
     g: np.ndarray = field(default_factory=lambda: np.array([0, 0, 9.819]))
-    # initial_global_pos: np.ndarray = field(default_factory=lambda: np.array(
-    #     [0.0,
-    #      0.0,
-    #      0.0]))
-    #
 
     def dof(self):
         return 9 + len(self.gyro_bias) + len(self.acc_bias)
