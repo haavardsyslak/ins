@@ -37,7 +37,7 @@ class UKFM:
 
     def propagate(self, u, dt):
         # Q = self.model.Q_c
-        self.P += 1e-9 * np.eye(self.P.shape[0])
+        # self.P += 1e-9 * np.eye(self.P.shape[0])
 
         if self.Q is not None:
             Q = self.Q  # * dt  # TOOO: need to get the discritized Q mat
@@ -80,14 +80,19 @@ class UKFM:
         new_xis = new_xis - xi_bar
 
         Q = self.points.Wc_i * new_xis.T.dot(new_xis) + self.points.Wc_0 * np.outer(xi_bar, xi_bar)
+
         self.P = P + Q
         # self.P[9:12, 9:12] += self.model.Q[6:9, 6:9]
         self.P = (self.P + self.P.T) / 2
+        eigvals, eigvecs = np.linalg.eigh(self.P)
+        eigvals[eigvals < 0] = 0
+        P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        self.P = P_psd#(P_psd + P_psd.T) / 2      
         self.x = x_pred
         # self.x = self.model.phi(x_pred, new_xi)
 
     def update(self, measurement, dt, h=None, R=None):
-        self.P += 1e-8 * np.eye(self.P.shape[0])
+        # self.P += 1e-8 * np.eye(self.P.shape[0])
         h = measurement.h
 
         if R is None:
@@ -122,8 +127,13 @@ class UKFM:
 
         self.P -= K @ S @ K.T
 
+        eigvals, eigvecs = np.linalg.eigh(self.P)
+        eigvals[eigvals < 0] = 0
+        P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        self.P = P_psd
+        # self.P = (P_psd + P_psd.T) / 2      
         # Avoid non sysmetric matrices
-        self.P = (self.P + self.P.T) / 2
+        # self.P = (self.P + self.P.T) / 2
 
     def nees_pos(self, true_pos):
         idx = 2
@@ -137,7 +147,6 @@ class UKFM:
 
     def to_proto_msg(self):
         extended_pose = self.x.extended_pose
-        g = self.x.g[-1]
         quat = extended_pose.coeffs()[3:7]
 
         vel = extended_pose.rotation().T @ extended_pose.linearVelocity()
@@ -156,7 +165,6 @@ class UKFM:
             velocity_y=vel[1],
             velocity_z=vel[2],
             heading=yaw,
-            g=g,
             roll=roll,
             pitch=pitch,
             gyro_bias_x=self.x.gyro_bias[0],

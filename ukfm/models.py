@@ -22,7 +22,7 @@ class ImuModel:
     Q: "np.ndarray[6, 6]" = field(init=False, repr=False)
 
     def __post_init__(self):
-        self.g = np.array((0, 0, 9.8))
+        self.g = np.array((0, 0, 9.819))
         self.Q = scipy.linalg.block_diag(
             self.gyro_std**2 * np.eye(3),
             self.accel_std**2 * np.eye(3),
@@ -31,26 +31,26 @@ class ImuModel:
         )
 
     def f(self, state: LieState, u: np.ndarray, dt: float, w: np.ndarray):
-        omega = u[:3] - state.gyro_bias + w[:3]
+        omega = u[:3] + w[:3] - state.gyro_bias
         # print(u[:3])
-        a_m = (u[3:6] * 9.80665) - state.acc_bias + w[3:6]
+        a_m = (u[3:6] * 9.80665) + w[3:6]- state.acc_bias
         # print(a_m)
         R = state.extended_pose.rotation()
-        Rt = state.extended_pose.rotation().T
-        acc = a_m + Rt @ state.g
-
+        acc = a_m + R.T @ state.g
         theta = omega * dt
         d_vel = acc * dt
-        d_pos = Rt @ state.extended_pose.linearVelocity() * dt #+ .5 * acc * dt**2
+        d_pos = R.T @ state.extended_pose.linearVelocity() * dt # * dt + .5 * acc * dt**2
         xi = np.concatenate([d_pos, theta, d_vel])
         tangent = manif.SE_2_3Tangent(xi)
 
         new_extended_pose = state.extended_pose.rplus(tangent)
-        # gyro_bias = state.gyro_bias + w[6:9]
-        # acc_bias = state.acc_bias + w[9:12]
 
-        gyro_bias = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias + w[6:9]
-        acc_bias = np.exp(-dt * self.accel_bias_p) * state.acc_bias + w[9:12]
+        gyro_bias = state.gyro_bias + w[6:9]
+        acc_bias = state.acc_bias + w[9:12]
+
+        # gyro_bias = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias + w[6:9]
+        # acc_bias = np.exp(-dt * self.accel_bias_p) * state.acc_bias + w[9:12]
+
         # acc_bias = np.zeros(3)
         # gyro_bias[1] = 0
         return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
@@ -62,7 +62,7 @@ class ImuModel:
     def phi_up(cls, state, xi):
         # return cls.phi(state, xi)
         tangent = manif.SE_2_3Tangent(xi[:9])
-        new_extended_pose = tangent + state.extended_pose  # + tangent
+        new_extended_pose = tangent + state.extended_pose
         gyro_bias = state.gyro_bias + xi[9:12]
         acc_bias = state.acc_bias + xi[12:15]
         return LieState(extended_pose=new_extended_pose, gyro_bias=gyro_bias, acc_bias=acc_bias)
