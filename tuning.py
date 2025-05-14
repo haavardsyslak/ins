@@ -5,8 +5,8 @@ from dataclasses import dataclass
 class UKFMTuning:
 
     def R_dvl(self, fom=None):
-        return np.eye(3) * fom**2 * 0.01
-        # return np.diag([0.1**2, 0.1**2, 0.3**2])
+        # return np.eye(3) * fom**2 
+        return np.diag([0.5**2, 0.5**2, 0.1**2]) * 2
 
     def R_gnss(self, std=2.5):
         return np.eye(2) * std**2
@@ -18,11 +18,11 @@ class UKFMTuning:
 class ESEKFTuning:
 
     def R_dvl(self, fom=None):
-        return np.eye(3) * fom**2 * np.diag([0, 0, 1]) * 0.1
-        # return np.diag([0.25**2, 0.25**2, 0.1**2])
+        # return np.eye(3) * fom**2
+        return np.diag([0.25**2, 0.25**2, 0.1**2])
 
     def R_gnss(self, std=2.5):
-        return np.eye(2) * std**2 * 10
+        return np.eye(2) * 0.5**2
 
     def R_depth(self):
         return np.eye(1) * 0.01**2
@@ -31,7 +31,7 @@ class ESEKFTuning:
 class QUKFTuning:
 
     def R_dvl(self, fom=None):
-        return np.eye(3) * fom**2 
+        # return np.eye(3) * fom**2 
         # return np.diag([0.25**2, 0.25**2, 0.1**2])
 
     def R_gnss(self, std=2.5):
