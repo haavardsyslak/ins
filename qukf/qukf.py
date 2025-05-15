@@ -37,9 +37,8 @@ class QUKF:
         self.innovation = None
 
     def propagate(self, u, dt):
-        self.P += np.eye(self.dim_x) * 1e-3
+        # self.P += np.eye(self.dim_x) * 1e-8
         Q = self.model.Q
-
 
         # Augment the covariance matrix
         self.P_aug[:self.dim_x, :self.dim_x] = self.P
@@ -72,14 +71,14 @@ class QUKF:
         eigvals, eigvecs = np.linalg.eigh(P)
         eigvals[eigvals < 0] = 0
         P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
-        self.P = (P_psd + P_psd.T) / 2      
+        self.P = (P_psd + P_psd.T) / 2
         # TODO: when biases are added, we need to add the noise for the biases to the biases
         # self.P = (P + P.T) / 2
         self.x = State.from_vec(x_bar)
         self.propgated_sigmas = sigmas
 
     def update(self, measurement, dt: float, R=None):
-        self.P += np.eye(self.dim_x) * 1e-3
+        # self.P += np.eye(self.dim_x) * 1e-8
 
         R = measurement.R
         z = measurement.z
@@ -92,7 +91,7 @@ class QUKF:
             sigmas_z[i] = measurement.h(x)
 
         z_hat = np.dot(self.sigma_points.Wm, sigmas_z)
-        
+
         # y = sigmas_z - z_hat[np.newaxis, :]
         Wc_diag = np.diag(self.sigma_points.Wc)
         # S = np.dot(y.T, np.dot(Wc_diag, y)) + measurement.R
@@ -126,13 +125,13 @@ class QUKF:
         eigvals, eigvecs = np.linalg.eigh(P)
         eigvals[eigvals < 0] = 0
         P_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
-        self.P = (P_psd + P_psd.T) / 2      
+        self.P = (P_psd + P_psd.T) / 2
 
     def nees_pos(self, true_pos):
         idx = 2
         x_hat = self.x.position[:idx]
         x = true_pos[:idx]
-        return (x_hat - x).T @ np.linalg.inv(self.P[:idx, :idx]) @ (x_hat - x)
+        return (x_hat - x).T @ np.linalg.inv(self.P[3:3 + idx, 3:3 + idx]) @ (x_hat - x)
 
     def nis(self):
         # Compute the NIS
@@ -160,12 +159,12 @@ class QUKF:
             heading=yaw,
             roll=roll,
             pitch=pitch,
-            # gyro_bias_x=self.x.gyro_bias[0],
-            # gyro_bias_y=self.x.gyro_bias[1],
-            # gyro_bias_z=self.x.gyro_bias[2],
-            # accel_bias_x=self.x.acc_bias[0],
-            # accel_bias_y=self.x.acc_bias[1],
-            # accel_bias_z=self.x.acc_bias[2],
+            gyro_bias_x=self.x.gyroscope_bias[0],
+            gyro_bias_y=self.x.gyroscope_bias[1],
+            gyro_bias_z=self.x.gyroscope_bias[2],
+            accel_bias_x=self.x.accelerometer_bias[0],
+            accel_bias_y=self.x.accelerometer_bias[1],
+            accel_bias_z=self.x.accelerometer_bias[2],
             covariance=np.diag(self.P)
         )
 
