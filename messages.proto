@@ -9,7 +9,7 @@ message CustomTel {
   string status = 4;
 }
 
-message UkfState {
+message State {
   // Timestamp in nanoseconds since epoch (optional)
   uint64 timestamp = 1;
 
