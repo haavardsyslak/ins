@@ -57,32 +57,25 @@ class ImuModel:
         We assume the change in orientation is negligable when caculating
         predicted position and velicity
         """
-        omega = u[:3] #- state.gyro_bias
-        a_m = (u[3:6] * 9.80665)# - state.acc_bias
+        omega = u[:3] - state.gyro_bias
+        a_m = (u[3:6] * 9.80665) - state.acc_bias
         # a_m[:2] *= -1
 
         Rq = state.R
-        # acc = a_m + Rq.T @ self.g
         acc = Rq @ a_m + self.g
-
-        # omega[:2] = 0.0
         theta = omega * dt
         d_vel = acc * dt
 
         pos_pred = state.pos + (dt * state.vel) #+ 0.5 * dt**2 * acc
-        vel_pred = state.vel + d_vel * dt
+        vel_pred = state.vel + d_vel 
 
         tangent = manif.SO3Tangent(theta)
         ori_pred = state.ori.rplus(tangent)
 
-        # delta_rot = AttitudeError.from_rodrigues_param(theta)
-        # ori_pred = state.ori.multiply(delta_rot)
-        
-        # q = (Rot.from_matrix(Rq) * Rot.from_rotvec(theta)).as_quat()
-        # ori_pred = RotationQuaterion(q[-1], q[:3])
-
-        acc_bias_pred = np.exp(-dt * self.accel_bias_p) * state.acc_bias
-        gyro_bias_pred = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias
+        # acc_bias_pred = np.exp(-dt * self.accel_bias_p) * state.acc_bias
+        # gyro_bias_pred = np.exp(-dt * self.gyro_bias_p) * state.gyro_bias
+        acc_bias_pred = state.acc_bias
+        gyro_bias_pred = state.gyro_bias
 
         x_pred = NominalState(ori=ori_pred, pos=pos_pred, vel=vel_pred, gyro_bias=gyro_bias_pred,
                               acc_bias=acc_bias_pred)
@@ -93,7 +86,7 @@ class ImuModel:
             u: ImuMeasurement,
             ) -> 'np.ndarray[15, 15]':
         """
-        Get the continuous time state transition matrix, A_c
+        Get the continuous time state transition matrix, F_c
         """
         F_c = np.zeros((15, 15))
         Rq = x_est_nom.R
