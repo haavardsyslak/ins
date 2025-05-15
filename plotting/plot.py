@@ -163,7 +163,7 @@ def plot_velocity_with_std_bounds(data, estimate_topic, dvl_topic, cov_indices, 
     cov_flat = np.array(data[estimate_topic]["covariance"])
     vel_min = vel_est.min(axis=0)
     vel_max = vel_est.max(axis=0)
-    padding = 0.2 * (vel_max - vel_min)
+    padding = 0.5 * (vel_max - vel_min)
     y_lims = [(vel_min[i] - padding[i], vel_max[i] + padding[i]) for i in range(3)]
 
     t_dvl = get_relative_time(data[dvl_topic]["timestamp"])
@@ -179,10 +179,10 @@ def plot_velocity_with_std_bounds(data, estimate_topic, dvl_topic, cov_indices, 
 
     for i, (ax, cov_idx, label) in enumerate(zip(axes, cov_indices, labels)):
         vel_i = vel_est[:, i]
-        std_i = np.sqrt(cov_flat[:, cov_idx]) * 3
+        std_i = np.sqrt(cov_flat[:, cov_idx])
         dvl_i = vel_dvl_interp[:, i]
 
-        ax.plot(t_est, vel_i, label=f"{label_prefix}{label} (UKF)")
+        ax.plot(t_est, vel_i, label=f"{label_prefix}{label}")
         ax.fill_between(t_est, vel_i - std_i, vel_i + std_i, alpha=0.3, label=r"$\pm3\sigma$")
         ax.plot(t_est, dvl_i, 'k--', label="DVL")
 
@@ -234,6 +234,7 @@ def plot_nis_nees_with_chi2_bounds(data, nis_topic, nees_topic, dof_nis, dof_nee
     ax.set_title(f"NIS (inside bounds: {nis_inside:.1f}%)")
     ax.set_ylabel("NIS")
     ax.grid(True)
+    ax.set_ylim(-3, 40)
     ax.legend()
 
     # NEES Plot
@@ -343,22 +344,137 @@ def plot_accel_bias_with_std_bounds(data, topic, cov_indices, label_prefix=""):
 
     axes[-1].set_xlabel("Time [s]")
     plt.tight_layout()
-    plt.show()
 
 
+def plot_xy_trajectory_comparison(datasets: dict, labels: dict):
+    """
+    Plot X vs Y trajectory for multiple filters with GNSS reference.
+
+    Args:
+        datasets (dict): Mapping from filter name to data dict (output of make_dict).
+        labels (dict): Mapping from filter name to display label.
+    """
+    plt.figure(figsize=(8, 6))
+    colors = plt.cm.tab10.colors
+    filter_names = list(datasets.keys())
+
+    for idx, name in enumerate(filter_names):
+        pos = datasets[name]["UKFState"]["pos"]
+        plt.plot(pos[:, 1], pos[:, 0], label=labels[name], color=colors[idx])
+
+    # GNSS reference
+    gnss = datasets[filter_names[0]]["gnss.Pose"]  # shared reference
+    plt.plot(gnss["pos"][:, 1], gnss["pos"][:, 0], 'k--', label="GNSS")
+
+    plt.xlabel("East [m]")
+    plt.ylabel("North [m]")
+    plt.title("Trajectory (X vs Y)")
+    plt.legend()
+    plt.axis("equal")
+    plt.grid(True)
+    plt.tight_layout()
+
+def plot_xy_vs_time_comparison(datasets: dict, labels: dict):
+    """
+    Plot X and Y position over time for multiple filters with GNSS reference.
+
+    Args:
+        datasets (dict): Mapping from filter name to data dict (output of make_dict).
+        labels (dict): Mapping from filter name to display label.
+    """
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    colors = plt.cm.tab10.colors
+    filter_names = list(datasets.keys())
+
+    for i, axis in enumerate(['X', 'Y']):
+        ax = axes[i]
+        for idx, name in enumerate(filter_names):
+            d = datasets[name]
+            t = get_relative_time(d["UKFState"]["timestamp"])
+            pos = d["UKFState"]["pos"][:, i]
+            ax.plot(t, pos, label=labels[name], color=colors[idx])
+        
+        # GNSS overlay
+        gnss = datasets[filter_names[0]]["gnss.Pose"]  # shared reference
+        t_gnss = get_relative_time(gnss["timestamp"])
+        pos_gnss = gnss["pos"][:, i]
+        ax.plot(t_gnss, pos_gnss, 'k--', label="GNSS")
+
+        ax.set_ylabel(f"{axis} [m]")
+        ax.grid(True)
+        ax.set_title(f"{axis} Position")
+        ax.legend()
+
+    axes[1].set_xlabel("Time [s]")
+    plt.tight_layout()
+
+
+def compute_rmse_and_ssrmse(data, estimate_topic="UKFState", truth_topic="gnss.Pose", steady_frac=0.5):
+    """
+    Computes RMSE and SSRMSE for X, Y, and combined position error norm.
+
+    Args:
+        data (dict): Parsed dataset from make_dict.
+        estimate_topic (str): Topic name for estimated states.
+        truth_topic (str): Topic name for GNSS truth data.
+        steady_frac (float): Fraction of time used for SSRMSE (default = 0.3 = last 30%).
+
+    Returns:
+        dict: {
+            "rmse": {"x": float, "y": float, "total": float},
+            "ssrmse": {"x": float, "y": float, "total": float}
+        }
+    """
+    # Extract time and positions
+    t_est = get_relative_time(data[estimate_topic]["timestamp"])
+    est_pos = np.array(data[estimate_topic]["pos"])[:, :2]  # X, Y only
+
+    t_truth = get_relative_time(data[truth_topic]["timestamp"])
+    truth_pos = np.array(data[truth_topic]["pos"])[:, :2]
+
+    # Interpolate GNSS to estimator timestamps
+    truth_interp = np.stack([
+        np.interp(t_est, t_truth, truth_pos[:, i]) for i in range(2)
+    ], axis=1)
+
+    # Full error array
+    error = est_pos - truth_interp
+    error_norm = np.linalg.norm(error, axis=1)
+
+    # Full RMSE
+    rmse_x = np.sqrt(np.mean(error[:, 0]**2))
+    rmse_y = np.sqrt(np.mean(error[:, 1]**2))
+    rmse_total = np.sqrt(np.mean(error_norm**2))
+
+    # Steady-state RMSE
+    N = len(t_est)
+    ss_start = int((1 - steady_frac) * N)
+    error_ss = error[ss_start:]
+    error_ss_norm = np.linalg.norm(error_ss, axis=1)
+
+    ssrmse_x = np.sqrt(np.mean(error_ss[:, 0]**2))
+    ssrmse_y = np.sqrt(np.mean(error_ss[:, 1]**2))
+    ssrmse_total = np.sqrt(np.mean(error_ss_norm**2))
+
+    return {
+        "rmse": {"x": rmse_x, "y": rmse_y, "total": rmse_total},
+        "ssrmse": {"x": ssrmse_x, "y": ssrmse_y, "total": ssrmse_total}
+    }
 def get_relative_time(timestamps):
     return timestamps - timestamps[0]
 
 # msgs = McapProtobufReader("mcap_plotting/square_dead_rekkoning_final.mcap")
 # msgs = McapProtobufReader("mcap_plotting/square_dead_rekkoning_final_ferdiferdi.mcap")
-msgs = McapProtobufReader("01testing_esekf.mcap")
-data = defaultdict(lambda: defaultdict(list))
+# msgs = McapProtobufReader("01testing_esekf.mcap")
+def make_dict(filename, kf_type):
+    msgs = McapProtobufReader(filename)
+    data = defaultdict(lambda: defaultdict(list))
 
-for message in msgs:
-    timestamp = message.log_time_ns * 1e-9  # convert ns to seconds
+    for message in msgs:
+        timestamp = message.log_time_ns * 1e-9  # convert ns to seconds
+        topic = message.topic
 
-    match message.topic:
-        case "UKFState":
+        if message.topic == f"{kf_type}.State":
             msg = message.proto_msg
             data["UKFState"]["timestamp"].append(timestamp)
             data["UKFState"]["pos"].append(np.array([msg.position_x, msg.position_y, msg.position_z]))
@@ -370,33 +486,35 @@ for message in msgs:
             data["UKFState"]["accel_bias"].append(np.array([msg.accel_bias_x, msg.accel_bias_y, msg.accel_bias_z]))
             data["UKFState"]["covariance"].append(msg.covariance)
 
-        case "gnss.Pose":
+        if topic == f"{kf_type}.gnss.Pose":
             msg = message.proto_msg
             data["gnss.Pose"]["timestamp"].append(timestamp)
             data["gnss.Pose"]["pos"].append([msg.translation.x, msg.translation.y, msg.translation.z])
 
-        case "blueye.protocol.DvlVelocityTel":
+        if topic ==  "blueye.protocol.DvlVelocityTel":
             vel = message.proto_msg.dvl_velocity.velocity
             data["DVL"]["timestamp"].append(timestamp)
             data["DVL"]["vel"].append([vel.x, vel.y, vel.z])
 
-        case "blueye.protocol.DepthTel":
+        if topic == "blueye.protocol.DepthTel":
             depth = message.proto_msg.depth.value
             data["Depth"]["timestamp"].append(timestamp)
             data["Depth"]["depth"].append(depth)
 
-        case "Dvl.Nis":
+        if topic == f"{kf_type}.Dvl.Nis":
             data["Dvl.NIS"]["timestamp"].append(timestamp)
             data["Dvl.NIS"]["nis"].append(message.proto_msg.value)
 
-        case "NEES pos":
+        if topic == f"{kf_type}.NEES pos":
             data["NEES"]["timestamp"].append(timestamp)
             data["NEES"]["pos"].append(message.proto_msg.value)
 
 # Convert all lists to numpy arrays
-for topic in data:
-    for key in data[topic]:
-        data[topic][key] = np.array(data[topic][key])
+    for topic in data:
+        for key in data[topic]:
+            data[topic][key] = np.array(data[topic][key])
+
+    return data
 
 mpl.rcParams.update({
     "font.size": 12,              # Base font size
@@ -412,14 +530,15 @@ def ukfm_square_plots(label_prefix="UKFM"):
     make_plots(label_prefix)
 # plot_3d_position(data, "UKFState")
 
-def make_plots(label_prefix):
+def make_plots(data, label_prefix):
+    file_prefix = label_prefix.strip().lower() + "_all_"
     plot_xyz_with_std_bounds(
         data,
         topic="UKFState",
         cov_indices=(0, 1, 2),
         label_prefix=label_prefix
     )
-    plt.savefig("plotting/ukfm_position.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_position.pdf", bbox_inches='tight')
 
     plot_position_error_with_std_bounds(
         data,
@@ -428,7 +547,7 @@ def make_plots(label_prefix):
         cov_indices=(0, 1, 2),  # if state starts with position
         label_prefix=label_prefix
     )
-    plt.savefig("plotting/ukfm_position_error.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_position_error.pdf", bbox_inches='tight')
 
     plot_velocity_with_std_bounds(
         data,
@@ -437,7 +556,7 @@ def make_plots(label_prefix):
         cov_indices=(6,7,8),
         label_prefix=label_prefix
     )
-    plt.savefig("plotting/ukfm_velocity.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_velocity.pdf", bbox_inches='tight')
 
     plot_nis_nees_with_chi2_bounds(
         data,
@@ -447,10 +566,11 @@ def make_plots(label_prefix):
         dof_nees=2,
         alpha=0.05
     )
-    plt.savefig("plotting/ukfm_NIS_NEES.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_NIS_NEES.pdf", bbox_inches='tight')
 
 
     plot_orientation(data, topic="UKFState", label_prefix=label_prefix)
+    plt.savefig(f"plotting/{file_prefix}_orientation.pdf", bbox_inches='tight')
 
     plot_gyro_bias_with_std_bounds(
         data,
@@ -458,7 +578,7 @@ def make_plots(label_prefix):
         cov_indices=(9, 10, 11),
         label_prefix="UKFM "
     )
-    plt.savefig("plotting/ukf_gyro_bias.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_gyro_bias.pdf", bbox_inches='tight')
 
     plot_accel_bias_with_std_bounds(
         data,
@@ -466,8 +586,53 @@ def make_plots(label_prefix):
         cov_indices=(12, 13, 14),
         label_prefix=label_prefix
     )
-    plt.savefig("plotting/ukf_accel_bias.pdf", bbox_inches='tight')
+    plt.savefig(f"plotting/{file_prefix}_accel_bias.pdf", bbox_inches='tight')
 
     plt.show()
 
-make_plots("ESEKF ")
+def comparisons(filename):
+    filters = ["ukfm", "qukf", "esekf"]
+    labels = {"ukfm": "UKFM", "qukf": "QUKF", "esekf": "ESEKF"}
+
+    datasets = {kf: make_dict(filename, kf) for kf in filters}
+
+    plot_xy_vs_time_comparison(datasets, labels)
+    plt.savefig("plotting/xy_vs_time_comparison_2min_DR.pdf", bbox_inches='tight')
+    plot_xy_trajectory_comparison(datasets, labels)
+    plt.savefig("plotting/xy_trajectory_comparison_2min_DR.pdf", bbox_inches='tight')
+    plt.show()
+
+def print_rmse(filename):
+    # filename = "mcap_plotting/square_dead_rekkoning_all_final.mcap"
+    kf_types = ["ukfm", "qukf", "esekf"]
+
+    for kf in kf_types:
+        data = make_dict(filename, kf)
+        result = compute_rmse_and_ssrmse(data)
+        print(f"{kf.upper()}:")
+
+        print("RMSE:")
+        print(f"  X:     {result['rmse']['x']:.3f} m")
+        print(f"  Y:     {result['rmse']['y']:.3f} m")
+        print(f"  Total: {result['rmse']['total']:.3f} m")
+
+        print("SSRMSE (steady state):")
+        print(f"  X:     {result['ssrmse']['x']:.3f} m")
+        print(f"  Y:     {result['ssrmse']['y']:.3f} m")
+        print(f"  Total: {result['ssrmse']['total']:.3f} m")
+
+
+
+def plot_single(filename, kf):
+    filename = "mcap_plotting/square_dead_rekkoning_all_final.mcap"
+    data = make_dict(filename, kf)
+    title = kf.upper() + " "
+    make_plots(data, title)
+
+if __name__ == "__main__":
+    kf = "ukfm"
+    filename = "mcap_plotting/square_dead_rekkoning_all_final.mcap"
+    filename = "01testiing_qukf.mcap"
+    # print_rmse(filename)
+    # comparisons(filename)
+    plot_single(filename, kf)
