@@ -89,7 +89,7 @@ class SigmaPoints:
 
     def compute_sigma_points(self, x, P):
 
-        L = np.linalg.cholesky((self.n + self.lamb) * P).T
+        L = np.linalg.cholesky((self.n + self.lamb) * P, upper=False).T
 
         points = np.zeros((self.num_sigmas, self.n))
         points[0] = x
