@@ -6,7 +6,9 @@ import utils
 from typing import Self
 import math
 from tqdm import tqdm
-from tuning import ESEKFTuning, UKFMTuning
+import time
+from tuning import ESEKFTuning, UKFMTuning, QUKFTuning
+import statistics
 
 # from models import DvlMeasurement, DepthMeasurement, GnssMeasurement
 from foxglove_schemas_protobuf.LocationFix_pb2 import LocationFix
@@ -55,8 +57,18 @@ class KFRunner:
         self.last_depth = 0.0
         if "esekf" in str(kf.__class__):
             self.tuning = ESEKFTuning()
+            self.prefix = "esekf"
         elif "ukfm" in str(kf.__class__):
             self.tuning = UKFMTuning()
+            self.prefix = "ukfm"
+        else:
+            self.tuning = QUKFTuning()
+            self.prefix = "qukf"
+        self.propagation_times = []
+        self.update_times = []
+        self.total_messages = 0
+        self.propagation_count = 0
+        self.update_count = 0
 
     def handle_message(self, message):
         topic = message.topic
@@ -67,9 +79,15 @@ class KFRunner:
                 self.elapsed_time += dt
                 self.last_gnss_time += dt
                 self.omega = u[:3]
+                start = time.perf_counter()
                 self.kf.propagate(u, dt)
-                self._publish_pose(message.log_time_ns, "ukf.Pose", self.kf.x.position, "rov")
-                self._publish_raw(message)
+                duration = time.perf_counter() - start
+                self.propagation_times.append(duration)
+                self.propagation_count += 1
+                self._publish_pose(
+                    message.log_time_ns, f"{self.prefix}.Pose", self.kf.x.position, ""
+                )
+                # self._publish_raw(message)
                 self._publish_state(message.log_time_ns)
 
             case "blueye.protocol.DvlVelocityTel":
@@ -77,35 +95,47 @@ class KFRunner:
                 fom = message.proto_msg.dvl_velocity.fom
                 R_dvl = self.tuning.R_dvl(fom)
                 measurement = DvlMeasurement(R_dvl, vel)
+                start = time.perf_counter()
                 self.kf.update(measurement, 0.0)
+                duration = time.perf_counter() - start
+                self.update_times.append(duration)
+                self.update_count += 1
                 self._publish_state(message.log_time_ns)
-                self._publish_raw(message)
+                # self._publish_raw(message)
 
                 nis = self.kf.nis()
-                self._publish_nis("Dvl.Nis", nis, message.log_time_ns)
+                self._publish_nis(f"{self.prefix}.Dvl.Nis", nis, message.log_time_ns)
 
             case "blueye.protocol.PositionEstimateTel":
                 message = self._parse_drone_pos_estimate(message)
                 gnss_sensor = self._parse_gnss(message)
-                self._publish_raw(message)
+                # self._publish_raw(message)
 
                 if gnss_sensor.is_valid:
 
                     if gnss_sensor is not None:
                         gnss_pos = GlobalPos(
-                            gnss_sensor.global_position.latitude, gnss_sensor.global_position.longitude, self.last_depth
+                            gnss_sensor.global_position.latitude,
+                            gnss_sensor.global_position.longitude,
+                            self.last_depth,
                         )
                         ned_pos = gnss_pos.to_ned(self.initial_global_pos)
-                        self._publish_pose(message.log_time_ns, "gnss.Pose", ned_pos, "gnss")
-                        self._publish_position(gnss_pos, "gnss.LocationFix", message.log_time_ns)
+                        self._publish_pose(
+                            message.log_time_ns, f"{self.prefix}.gnss.Pose", ned_pos, "gnss"
+                        )
+                        # self._publ.......ish_position(gnss_pos, "gnss.LocationFix", message.log_time_ns)
                         nees = self.kf.nees_pos(ned_pos)
-                        self._publish_nees("NEES pos", nees, message.log_time_ns)
+                        self._publish_nees(f"{self.prefix}.NEES pos", nees, message.log_time_ns)
                         error = self.kf.x.position - ned_pos
                         z = ned_pos[:2]
                         if self.elapsed_time < 100:
                             R_gnss = self.tuning.R_gnss()
                             measurement = GnssMeasurement(R_gnss, z)
+                            start = time.perf_counter()
                             self.kf.update(measurement, 0.0)
+                            duration = time.perf_counter() - start
+                            self.update_times.append(duration)
+                            self.update_count += 1
                         elif self.last_gnss_time > 1:
                             self.last_gnss_time = 0
                             R_gnss = np.diag([500, 500])
@@ -113,23 +143,29 @@ class KFRunner:
                             # self.kf.update(measurement, 0.0)
 
             case "blueye.protocol.DepthTel":
-                self._publish_raw(message)
+                # self._publish_raw(message)
                 depth = self._parse_depth(message)
                 self.last_depth = depth
                 R_depth = self.tuning.R_depth()
                 # R_depth = 0.01**2 * np.eye(1)
                 # R_depth = 1e-9 * np.eye(1)
-                z = DepthMeasurement(R_depth, depth)
-                self.kf.update(z, 0.0)
+                measurement = DepthMeasurement(R_depth, depth)
+                start = time.perf_counter()
+                self.kf.update(measurement, 0.0)
+                duration = time.perf_counter() - start
+                self.update_times.append(duration)
+                self.update_count += 1
                 nis = self.kf.nis()
-                self._publish_nis("Depth.Nis", nis, message.log_time_ns)
-                
+                self._publish_nis(f"{self.prefix}.Depth.Nis", nis, message.log_time_ns)
+
     def _publish_pos_error(self, log_time, error):
         msg = PositionError(x=error[0], y=error[1], z=0)
         self.logger.publish("ukf.PosError", msg, log_time)
 
     def _publish_pose(self, log_time, topic, pos, frame):
         q = self.kf.x.q
+        if frame == "":
+            frame = self.prefix
 
         tf = FrameTransform(
             timestamp=utils.make_proto_timestamp(log_time),
@@ -172,10 +208,10 @@ class KFRunner:
 
     def _publish_state(self, log_time):
         msg = self.kf.to_proto_msg()
-        self.logger.publish("UKFState", msg, log_time)
+        self.logger.publish(f"{self.prefix}.State", msg, log_time)
 
         global_pos = self.initial_global_pos.from_ned(self.kf.x.position)
-        self._publish_position(global_pos, "ufk.locatinFix", log_time, cov=self.kf.P)
+        self._publish_position(global_pos, f"{self.prefix}.locatinFix", log_time, cov=self.kf.P)
 
     def _publish_position(self, pos: GlobalPos, topic: str, log_time, cov=None):
         location_fix_kwargs = dict(
@@ -185,9 +221,15 @@ class KFRunner:
             altitude=pos.alt,
         )
 
+        if self.prefix == "qukf":
+            s = 3
+            e = 6
+        else:
+            s = 0
+            e = 3
         if cov is not None:
             location_fix_kwargs.update(
-                position_covariance=cov[:3, :3].flatten().tolist(),
+                position_covariance=cov[s:e, s:e].flatten().tolist(),
                 position_covariance_type=3,
             )
 
@@ -227,14 +269,41 @@ class KFRunner:
         msg = NEES(value=nees)
         self.logger.publish(topic, msg, timestamp)
 
+    def _print_performance_summary(self):
+        import statistics
+
+        def summary(label, times):
+            if not times:
+                return f"{label}: No data"
+            mean = statistics.mean(times)
+            stddev = statistics.stdev(times) if len(times) > 1 else 0.0
+            mean_ms = mean * 1e3
+            stddev_ms = stddev * 1e3
+            return (
+                f"{label}:\n"
+                f"  mean     = {mean_ms:.3f} ms\n"
+                f"  max      = {1e3 * max(times):.3f} ms\n"
+                f"  min      = {1e3 * min(times):.3f} ms\n"
+                f"  stddev   = {stddev_ms:.3f} ms\n"
+                f"  95% CI   ≈ {mean_ms:.3f} ± {2 * stddev_ms:.3f} ms\n"
+                f"  count    = {len(times)}"
+            )
+
+        print(f"\n=== {self.prefix.upper()} Performance Metrics ===")
+        print(f"Total messages handled: {self.total_messages}")
+        print(f"Propagations: {self.propagation_count}")
+        print(f"Updates: {self.update_count}")
+        print(summary("Propagation time", self.propagation_times))
+        print(summary("Update time", self.update_times))
+        print("=========================================")
+
     def run(self, reader: McapProtobufReader):
         msg = reader.get_next_message()
+        # msg = reader.get_next_message()
         self._publish_state(msg.log_time_ns)
         self._publish_reference_frame(msg.log_time_ns)
 
         for message in tqdm(reader):
             self.handle_message(message)
 
-        self.logger.close()
-
-
+        self._print_performance_summary()
