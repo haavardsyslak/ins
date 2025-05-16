@@ -69,6 +69,7 @@ def get_initial_state(reader):
                     global_pos.alt = depth
 
         if first_dvl_msg_received and first_gnss_msg_received and first_dpeth_msg_received:
+            heading = 5
             return pos, velocity, heading, global_pos
 
 
@@ -84,7 +85,7 @@ def run_esekf(logger, filename):
     pos[0] = 0.0
     pos[1] = 0.0
 
-    heading = np.deg2rad(160)
+    # heading = np.deg2rad(160)
     heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("xyz", [0, 0, heading])
     q_scipy = rot.as_quat()
@@ -144,7 +145,7 @@ def run_ukfm(logger, filename):
     pos[0] = 0.0
     pos[1] = 0.0
 
-    heading = np.deg2rad(180 - 20)
+    # heading = np.deg2rad(180 - 20)
     heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("xyz", [0, 0, heading])
     q_scipy = rot.as_quat()
@@ -157,6 +158,7 @@ def run_ukfm(logger, filename):
     gyro_bias = np.array([0.0, 0.0, 0.0])
     accel_bias = np.array([-0.004, 0.0, -0.01])
     x0 = ukfm.LieState(extended_pose, gyro_bias=gyro_bias, acc_bias=accel_bias)
+
     # P0 = np.eye(x0.dof())
     # P0[0:3, 0:3] = 5 * np.eye(3)
     # # P0[2, 2] = 0.2**2
@@ -225,7 +227,7 @@ def run_qukf(logger, filename):
     pos[0] = 0.0
     pos[1] = 0.0
 
-    heading = np.deg2rad(180 - 20)
+    # heading = np.deg2rad(180 - 20)
     heading = wrap_plus_minis_pi(heading)
     rot = Rot.from_euler("xyz", [0, 0, heading])
     q_scipy = rot.as_quat()
@@ -292,11 +294,12 @@ def publish_raw(message, logger):
 
 if __name__ == "__main__":
     # run_qukf()
-    logger = FoxgloveLogger("01testiing_qukf.mcap", stream=False)
-    filename = "adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap"
+    logger = FoxgloveLogger("01testiing_2min_dive.mcap", stream=False)
+    # filename = "adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap"
+    filename = "adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap"
     # filename = "adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap"
-    # run_esekf(logger, filename)
-    # run_ukfm(logger, filename)
+    run_esekf(logger, filename)
+    run_ukfm(logger, filename)
     run_qukf(logger, filename)
     reader = McapProtobufReader(filename)
 
