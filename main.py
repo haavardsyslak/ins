@@ -295,8 +295,8 @@ if __name__ == "__main__":
     logger = FoxgloveLogger("01testiing_qukf.mcap", stream=False)
     filename = "adis_mcap/log_auto_square_2025-05-07 14:55:13.mcap"
     # filename = "adis_mcap/log_dive_2min_2025-05-07 15:06:13.mcap"
-    # run_esekf(logger, filename)
-    # run_ukfm(logger, filename)
+    run_esekf(logger, filename)
+    run_ukfm(logger, filename)
     run_qukf(logger, filename)
     reader = McapProtobufReader(filename)
 

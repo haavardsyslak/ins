@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class UKFMTuning:
 
     def R_dvl(self, fom=None):
-        return np.eye(3) * fom**2 
+        # return np.eye(3) * fom**2 
         return np.diag([0.5**2, 0.5**2, 0.5**2]) * 2
 
     def R_gnss(self, std=2.5):
