@@ -53,11 +53,6 @@ class DvlMeasurement(Measurement):
         return state.R.T @ state.velocity - self.lever_arm_comp
 
     def H(self, state: IState):
-        """
-        Compute measurement Jacobian H for h(x) = R(q)^T v.
-        Assumes scalar-first quaternion q = [qw, qx, qy, qz].
-        Returns: H ∈ ℝ^{3×19}
-        """
         H_out = np.zeros((3, 16))
 
         # Extract quaternion and velocity from state
