@@ -10,5 +10,5 @@ This repository suplements the thesis by Håvard Syslak and contains code for:
 - Logging and streaming Foxglove Studio for live visualization
 
 
-![Foxglove visualization for comparing the three versions of the kalman filter](./images/foxglove.png
+![Foxglove visualization for comparing the three versions of the kalman filter](./images/foxglove.png)
 
